@@ -330,7 +330,8 @@ def classify_planes(planes, cam_ori, pcd_):
             color = [0, 0, 1]
             verticals.append(center)
         else:
-            color = [0, 1, 0]
+            continue
+            # color = [0, 1, 0]
 
         plane.paint_uniform_color(color)
 
@@ -471,6 +472,7 @@ def main():
 
 
         if not added_geometry:
+            vis.add_geometry(pcd_)
             for plane, sphere in colored_planes:
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
@@ -478,6 +480,7 @@ def main():
             added_geometry = True
         else:
             vis.clear_geometries()
+            vis.add_geometry(pcd_)
             for plane, sphere in colored_planes:
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
