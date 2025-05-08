@@ -5,3 +5,7 @@ This project uses an RGB-D camera to detect the height and width of stairs. It p
 - Detects stair dimensions (height and width).
 - Utilizes RGB-D camera data for precise measurements.
 - Suitable for real-time applications.
+
+## How to start
+- conda env create -f stair_detection.yml
+- python stair_detection_ver4.py

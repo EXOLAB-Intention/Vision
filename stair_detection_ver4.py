@@ -9,6 +9,8 @@ from sklearn.cluster import DBSCAN
 from scipy.signal import savgol_filter
 import matplotlib.pyplot as plt
 import time
+import datetime
+import csv
 
 """
 ****************information****************
@@ -52,10 +54,28 @@ last_ts_gyro = 0
 angleX = 0
 angleY = 180
 angleZ = -90
+
 flag = True
 save_start = False
+
 W = 640
 H = 480
+
+stairs_height = []
+stairs_width = []
+
+base_dir = 'stairs_step_info'
+video_dir = 'stairs_step_video'
+
+timestamp = time.time()
+
+os.makedirs(base_dir, exist_ok=True)
+os.makedirs(video_dir, exist_ok=True)
+
+csv_file_path = os.path.join(base_dir, f'step_data_{timestamp}.csv')
+video_file_path = os.path.join(video_dir, f'step_video_{timestamp}.mp4')
+
+
 
 
 def calibrate(f):
@@ -322,12 +342,23 @@ def classify_planes(planes, cam_ori, pcd_):
         normal /= np.linalg.norm(normal)
         center = np.mean(np.asarray(plane.points), axis=0)
 
-        # Classify plane
-        if abs(normal[1]) > 0.75 and abs(normal[2]) < 0.25:  # horizontal
-            color = [1, 0, 0]
+
+        sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
+        sphere.translate(center)
+
+        center = rotate_vector(center, cam_ori)
+        # print(center,"\n")
+
+        # horizontal : red
+        if abs(normal[1]) > 0.9 and abs(normal[2]) < 0.1:
+            plane.paint_uniform_color([1, 0, 0])
+            sphere.paint_uniform_color([0, 0, 0])
             horizontals.append(center)
-        elif abs(normal[1]) < 0.25 and abs(normal[2]) > 0.75:  # vertical
-            color = [0, 0, 1]
+
+        # vertical : blue
+        elif abs(normal[1]) < 0.1 and abs(normal[2]) > 0.9:
+            plane.paint_uniform_color([0, 0, 1])
+            sphere.paint_uniform_color([0, 0, 0])
             verticals.append(center)
         else:
             continue
@@ -344,12 +375,34 @@ def classify_planes(planes, cam_ori, pcd_):
         override_indices.extend(indices)
         override_colors.extend([color] * len(indices))
 
-        # Sphere for visualization
-        sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
-        sphere.translate(center)
-        colored_planes.append((plane, sphere))
 
-    return colored_planes, stair_steps, override_indices, override_colors
+    # for h_center in horizontals:
+    #     min_dist = float('inf')
+    #     closest_v = None
+    #     for v_center in verticals:
+    #         dist = np.linalg.norm(h_center - v_center)
+    #         if dist < min_dist:
+    #             min_dist = dist
+    #             closest_v = v_center
+    #     if closest_v is not None:
+    #         height = abs(h_center[1] - closest_v[1]) * 2
+    #         depth = abs(h_center[2] - closest_v[2]) * 2
+    #         stair_steps.append((height, depth))
+
+
+    horizontals_sorted = sorted(horizontals, key=lambda x: x[1])
+
+    for i in range(len(horizontals_sorted) - 1):
+        center1 = horizontals_sorted[i]
+        center2 = horizontals_sorted[i + 1]
+
+        height = abs(center2[1] - center1[1])
+        depth = abs(center2[2] - center1[2])
+        
+        stair_steps.append((height, depth))
+        
+        
+    return colored_planes, stair_steps
 
 def cluster_stairs(horizontals, verticals, eps, min_samples):
     if not horizontals or not verticals:
@@ -412,6 +465,28 @@ def classify_planes_and_cluster_steps(planes, cam_ori):
     stair_steps = cluster_stairs(horizontals, verticals, eps=0.07, min_samples=5)
     return colored_planes, stair_steps
 
+
+def SaveData(avg_height, avg_depth):
+    
+    stairs_height.append(avg_height)
+    stairs_width.append(avg_depth)
+
+
+def GetData():
+    with open(csv_file_path, mode='w', newline='') as csvfile:
+        fieldnames = ['stairs_height', 'stairs_width']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        writer.writeheader()
+        for i in range(len(stairs_height)):
+            writer.writerow({'stairs_height': stairs_height[i],
+                             'stairs_width'  : stairs_width[i]
+                             })
+            
+    print(f"==================")
+    print(f"Data Saving Done")
+
+
 def main():
     pipeline = rs.pipeline()
     config = rs.config()
@@ -428,6 +503,9 @@ def main():
     image_with_ocv = True
     rendering = False
     ZOOM =0.25
+    save_start = False
+    flag = True
+
 
     if image_with_ocv:
         vis.create_window(window_name='Stair Perception', width=W, height=H, visible=False)
@@ -503,6 +581,28 @@ def main():
 
             cv2.imshow("stairs detection", stacked)
             key = cv2.waitKey(1)
+
+            if key == ord("s"):
+                if flag:
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    out = cv2.VideoWriter(video_file_path, fourcc, 8.0, (W, H))
+
+                    flag = False
+
+                print(f"==================")
+                print(f"Data Saving Start")
+                save_start = True
+            
+            if save_start:
+                out.write(color_image)
+                SaveData(avg_height, avg_depth)
+                
+            if key == ord("d"):
+                save_start = False
+                GetData()
+
+            if key in (27, ord("q")):
+                break
 
 if __name__ == "__main__":
     main()
