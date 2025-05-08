@@ -300,6 +300,13 @@ def create_point_cloud(depth_frame, color_frame, intrinsics, cam_rpy, window_siz
 
     # pcd = rotate_coordinates(pcd, cam_rpy)
 
+    # Add greyscale color based on depth (z-axis)
+    points = np.asarray(pcd_.points)
+    depths = -points[:, 2]  # flip z to make farther = brighter
+    depths_normalized = (depths - depths.min()) / (depths.max() - depths.min() + 1e-6)
+    greyscale_colors = np.tile(depths_normalized[:, np.newaxis], (1, 3))  # shape: (N, 3)
+    pcd_.colors = o3d.utility.Vector3dVector(greyscale_colors)
+
     return pcd, pcd_, color_image, depth_image
 
 
@@ -320,18 +327,21 @@ def segment_planes_ransac(pcd, distance_threshold=0.01, ransac_n=3, num_iteratio
 
     return planes
 
-def classify_planes(planes, cam_ori):
+def classify_planes(planes, cam_ori, pcd_):
     colored_planes = []
     horizontals = []
     verticals = []
     stair_steps = []
 
-    for plane_model, plane in planes:
+    override_indices = []
+    override_colors = []
 
+    for plane_model, plane in planes:
         normal = np.array(plane_model[:3])
         normal = rotate_vector(normal, cam_ori)
         normal /= np.linalg.norm(normal)
         center = np.mean(np.asarray(plane.points), axis=0)
+
 
         sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
         sphere.translate(center)
@@ -350,22 +360,21 @@ def classify_planes(planes, cam_ori):
             plane.paint_uniform_color([0, 0, 1])
             sphere.paint_uniform_color([0, 0, 0])
             verticals.append(center)
-
         else:
-            plane.paint_uniform_color([0, 1, 0])
+            continue
+            # color = [0, 1, 0]
 
-        colored_planes.append((plane, sphere))
+        plane.paint_uniform_color(color)
 
-        # if abs(normal[1]) > 0.75 and abs(normal[2]) < 0.25:  # horizontal : red
-        #     plane.paint_uniform_color([1, 0, 0])
-        #     horizontals.append(center)
-        # elif abs(normal[1]) < 0.25 and abs(normal[2]) > 0.75: # vertical : blue
-        #     plane.paint_uniform_color([0, 0, 1])
-        #     verticals.append(center)
-        # else:
-        #     plane.paint_uniform_color([0, 1, 0])
+        # Find corresponding indices in pcd_ to override color
+        pcd_points = np.asarray(pcd_.points)
+        plane_points = np.asarray(plane.points)
+        plane_set = set(map(tuple, plane_points))
+        indices = [i for i, pt in enumerate(pcd_points) if tuple(pt) in plane_set]
 
-        # colored_planes.append(plane)
+        override_indices.extend(indices)
+        override_colors.extend([color] * len(indices))
+
 
     # for h_center in horizontals:
     #     min_dist = float('inf')
@@ -514,14 +523,20 @@ def main():
         camera_rpy = get_camera_angle(aligned_frames)
         intr, pinhole_camera_intrinsic = get_camera_intrinsics(aligned_frames)
 
-        pcd_origin, pcd, color_image, depth_image = create_point_cloud(depth_frame, color_frame, pinhole_camera_intrinsic, camera_rpy)
+        pcd_origin, pcd_, color_image, depth_image = create_point_cloud(depth_frame, color_frame, pinhole_camera_intrinsic, camera_rpy)
         gray_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
 
         # Using Ransac
-        planes = segment_planes_ransac(pcd)
+        planes = segment_planes_ransac(pcd_)
 
         # Getting stairs step information from the distance btw horizontal and vertical plane
-        colored_planes, stair_steps = classify_planes(planes, camera_rpy)
+        colored_planes, stair_steps, override_indices, override_colors = classify_planes(planes, camera_rpy, pcd_)
+
+        # Override colors on the greyscale point cloud
+        np_colors = np.asarray(pcd_.colors)
+        for idx, col in zip(override_indices, override_colors):
+            np_colors[idx] = col
+        pcd_.colors = o3d.utility.Vector3dVector(np_colors)
 
         # # Gettign stairs step infromation from the clustering
         # colored_planes, stair_steps = classify_planes_and_cluster_steps(merged_planes, camera_rpy)
@@ -535,6 +550,7 @@ def main():
 
 
         if not added_geometry:
+            vis.add_geometry(pcd_)
             for plane, sphere in colored_planes:
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
@@ -542,6 +558,7 @@ def main():
             added_geometry = True
         else:
             vis.clear_geometries()
+            vis.add_geometry(pcd_)
             for plane, sphere in colored_planes:
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
