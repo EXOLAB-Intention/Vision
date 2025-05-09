@@ -59,10 +59,8 @@ def calculate_rotation(f, combinedangleX_prev, combinedangleY_prev, combinedangl
     # print(accel.x,", ", accel.y,", ", accel.z,", ")
     # print(accel_angle_x,", ", accel_angle_y,", ",accel_angle_z,", ")
 
-    # alpha = 0.05
-    # low alpha while stationary, high alpha while moving
     accel_norm = np.linalg.norm(np.array([accel.x, accel.y, accel.z]))
-    alpha = np.tanh(abs(accel_norm - 10))/1.2  # 가속도 값이 10에 가까울수록 alpha는 작아짐
+    alpha = np.tanh(abs(accel_norm - 10))/1.2  # low alpha while stationary, high alpha while moving
 
     combinedangleX = totalgyroangleX * alpha + accel_angle_x * (1-alpha)
     combinedangleY = totalgyroangleY * alpha + accel_angle_y * (1-alpha)
@@ -162,7 +160,7 @@ def rotate_vector(vec, cam_rpy):
     #     [np.sin(rz_rad), np.cos(rz_rad), 0],
     #     [0, 0, 1]
     # ])
-    R = R = rpy_to_rotmat(cam_rpy)
+    R = rpy_to_rotmat(cam_rpy)
 
     rotated_vec = R @ vec
 

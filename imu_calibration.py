@@ -35,26 +35,20 @@ def quaternion_to_rotation_matrix(q):
     ])
 
 def quaternion_to_euler(q):
-    # 입력 q = [w, x, y, z]
-    w, x, y, z = q
-    # Roll (x-axis rotation)
-    sinr_cosp = 2 * (w * x + y * z)
-    cosr_cosp = 1 - 2 * (x * x + y * y)
-    roll = math.atan2(sinr_cosp, cosr_cosp)
+    qw, qx, qy, qz = q
 
-    # Pitch (y-axis rotation)
-    sinp = 2 * (w * y - z * x)
-    if abs(sinp) >= 1:
-        pitch = math.copysign(math.pi / 2, sinp)  # use 90 degrees if out of range
-    else:
-        pitch = math.asin(sinp)
+    # φ: Roll
+    phi = math.atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx*qx + qy*qy))
 
-    # Yaw (z-axis rotation)
-    siny_cosp = 2 * (w * z + x * y)
-    cosy_cosp = 1 - 2 * (y * y + z * z)
-    yaw = math.atan2(siny_cosp, cosy_cosp)
+    # θ: Pitch (주의: asin 도 괜찮지만 위키피디아식 사용)
+    inner = math.sqrt(1 + 2 * (qw * qy - qx * qz))
+    outer = math.sqrt(1 - 2 * (qw * qy - qx * qz))
+    theta = -math.pi / 2 + 2 * math.atan2(inner, outer)
 
-    return np.rad2deg([roll, pitch, yaw])
+    # ψ: Yaw
+    psi = math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy*qy + qz*qz))
+
+    return np.degrees([phi, theta, psi])
 
 
 # ------- IMU attitude estimation (quaternion) ------- #
@@ -83,11 +77,11 @@ def calibrate_orientation(accel_vec):
 
 
 # ------- vector and point cloud rotation ------ #
-def rotate_vector(vec, cam_rpy):
-    cam2world_R = np.array([[0, -1,  0],
-                            [0,  0, -1],
-                            [1,  0,  0]])
- 
+def rpy_to_rotmat(cam_rpy):
+    cam2world_R = np.array([[ 0, -1,  0],
+                            [ 0,  0, -1],
+                            [-1,  0,  0]]) # Fixed at 2025.05.09
+    
     rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
 
     Rx = np.array([
@@ -107,44 +101,19 @@ def rotate_vector(vec, cam_rpy):
         [np.sin(rz_rad), np.cos(rz_rad), 0],
         [0, 0, 1]
     ])
-    R = Rz @ Ry @ Rx
+    return Rz @ Ry @ Rx
 
+
+def rotate_vector(vec, cam_rpy):
+    R = rpy_to_rotmat(cam_rpy)
     rotated_vec = R @ vec
 
     return rotated_vec
 
-# ---- PointCloud 회전 (성능 최적화, 법선/색상 보존) ----
 
 def rotate_coordinates(pcd, cam_rpy):
     points = np.asarray(pcd.points)
-    cam_coordinates = [np.zeros(points.shape[0]), 3]
-
-    cam2world_R = np.array([[0, -1,  0],
-                            [0,  0, -1],
-                            [1,  0,  0]])
- 
-    rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
-
-    Rx = np.array([
-        [1, 0, 0],
-        [0, np.cos(rx_rad), -np.sin(rx_rad)],
-        [0, np.sin(rx_rad), np.cos(rx_rad)]
-    ])
-
-    Ry = np.array([
-        [np.cos(ry_rad), 0, np.sin(ry_rad)],
-        [0, 1, 0],
-        [-np.sin(ry_rad), 0, np.cos(ry_rad)]
-    ])
-
-    Rz = np.array([
-        [np.cos(rz_rad), -np.sin(rz_rad), 0],
-        [np.sin(rz_rad), np.cos(rz_rad), 0],
-        [0, 0, 1]
-    ])
-
-    R = Rz @ Ry @ Rx
-
+    R = rpy_to_rotmat(cam_rpy)
     rotated_point = points @ R.T
 
     rotated_pcd = o3d.geometry.PointCloud()
@@ -152,6 +121,8 @@ def rotate_coordinates(pcd, cam_rpy):
 
     return rotated_pcd
 
+
+# ------- camera angle calculation ------ #
 
 def get_camera_angle(frames):
     global cam_quat, cam_rpy, last_ts_gyro
