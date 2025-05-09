@@ -6,8 +6,9 @@ from ahrs.filters import Madgwick
 
 # pip install ahrs
 
-madgwick_filter = Madgwick(sampleperiod=0.01)
+madgwick_filter = Madgwick(sampleperiod=0.01, beta=0.05)
 cam_quat  = np.array([1.0, 0.0, 0.0, 0.0])
+cam_rpy = np.array([0.0, 0.0, 0.0])
 last_ts_gyro = None
 
 # ------- quaternion operations ------- #
@@ -32,6 +33,28 @@ def quaternion_to_rotation_matrix(q):
         [    2*(x*y + w*z), 1 - 2*(x*x + z*z),     2*(y*z - w*x)],
         [    2*(x*z - w*y),     2*(y*z + w*x), 1 - 2*(x*x + y*y)]
     ])
+
+def quaternion_to_euler(q):
+    # 입력 q = [w, x, y, z]
+    w, x, y, z = q
+    # Roll (x-axis rotation)
+    sinr_cosp = 2 * (w * x + y * z)
+    cosr_cosp = 1 - 2 * (x * x + y * y)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+
+    # Pitch (y-axis rotation)
+    sinp = 2 * (w * y - z * x)
+    if abs(sinp) >= 1:
+        pitch = math.copysign(math.pi / 2, sinp)  # use 90 degrees if out of range
+    else:
+        pitch = math.asin(sinp)
+
+    # Yaw (z-axis rotation)
+    siny_cosp = 2 * (w * z + x * y)
+    cosy_cosp = 1 - 2 * (y * y + z * z)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+
+    return np.rad2deg([roll, pitch, yaw])
 
 
 # ------- IMU attitude estimation (quaternion) ------- #
@@ -60,86 +83,106 @@ def calibrate_orientation(accel_vec):
 
 
 # ------- vector and point cloud rotation ------ #
-def rotate_vector(vec, cam_quat):
-    # vec: np.array([x, y, z])
-    # cam_quat: [w, x, y, z] (from Madgwick)
-    
+def rotate_vector(vec, cam_rpy):
     cam2world_R = np.array([[0, -1,  0],
                             [0,  0, -1],
                             [1,  0,  0]])
-    vec_world = cam2world_R @ vec
-    vec_quat = np.array([0.0, *vec_world])
+ 
+    rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
 
-    # Rotation : q * v * q_conj
-    cam_quat_conj = quaternion_conjugate(cam_quat)
-    rotated_vec_quat = quaternion_multiply(quaternion_multiply(cam_quat, vec_quat), cam_quat_conj)
-    rotate_vec = rotated_vec_quat[1:] 
+    Rx = np.array([
+        [1, 0, 0],
+        [0, np.cos(rx_rad), -np.sin(rx_rad)],
+        [0, np.sin(rx_rad), np.cos(rx_rad)]
+    ])
 
-    return rotate_vec
+    Ry = np.array([
+        [np.cos(ry_rad), 0, np.sin(ry_rad)],
+        [0, 1, 0],
+        [-np.sin(ry_rad), 0, np.cos(ry_rad)]
+    ])
+
+    Rz = np.array([
+        [np.cos(rz_rad), -np.sin(rz_rad), 0],
+        [np.sin(rz_rad), np.cos(rz_rad), 0],
+        [0, 0, 1]
+    ])
+    R = Rz @ Ry @ Rx
+
+    rotated_vec = R @ vec
+
+    return rotated_vec
 
 # ---- PointCloud 회전 (성능 최적화, 법선/색상 보존) ----
-def rotate_coordinates(pcd, cam_quat):
-    # 원본 배열
-    pts    = np.asarray(pcd.points)
-    normals = np.asarray(pcd.normals) if pcd.has_normals() else None
-    colors  = np.asarray(pcd.colors)  if pcd.has_colors()  else None
 
-    # 좌표계 변환: RealSense → World
-    cam2world_R = np.array([[ 0, -1,  0],
-                            [ 0,  0, -1],
-                            [ 1,  0,  0]])
-    pts_world = (cam2world_R @ pts.T).T
-    if normals is not None:
-        normals_world = (cam2world_R @ normals.T).T
+def rotate_coordinates(pcd, cam_rpy):
+    points = np.asarray(pcd.points)
+    cam_coordinates = [np.zeros(points.shape[0]), 3]
 
-    # quaternion → 회전 행렬
-    R_cam    = quaternion_to_rotation_matrix(cam_quat)
-    # R_total  = R_cam @ cam2world_R  # world→camera or camera→world 순 확인하여 적절히 곱셈
+    cam2world_R = np.array([[0, -1,  0],
+                            [0,  0, -1],
+                            [1,  0,  0]])
+ 
+    rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
 
-    # 한 번에 벡터화 회전
-    pts_rot = (pts_world @ R_cam.T)
-    pcd2    = o3d.geometry.PointCloud()
-    pcd2.points = o3d.utility.Vector3dVector(pts_rot)
+    Rx = np.array([
+        [1, 0, 0],
+        [0, np.cos(rx_rad), -np.sin(rx_rad)],
+        [0, np.sin(rx_rad), np.cos(rx_rad)]
+    ])
 
-    # 법선 회전
-    if normals is not None:
-        normals_rot = (normals_world @ R_cam.T)
-        pcd2.normals = o3d.utility.Vector3dVector(normals_rot)
+    Ry = np.array([
+        [np.cos(ry_rad), 0, np.sin(ry_rad)],
+        [0, 1, 0],
+        [-np.sin(ry_rad), 0, np.cos(ry_rad)]
+    ])
 
-    # 색상 유지
-    if colors is not None:
-        pcd2.colors = o3d.utility.Vector3dVector(colors)
+    Rz = np.array([
+        [np.cos(rz_rad), -np.sin(rz_rad), 0],
+        [np.sin(rz_rad), np.cos(rz_rad), 0],
+        [0, 0, 1]
+    ])
 
-    return pcd2
+    R = Rz @ Ry @ Rx
+
+    rotated_point = points @ R.T
+
+    rotated_pcd = o3d.geometry.PointCloud()
+    rotated_pcd.points = o3d.utility.Vector3dVector(rotated_point)
+
+    return rotated_pcd
 
 
 def get_camera_angle(frames):
-    global cam_quat, last_ts_gyro
+    global cam_quat, cam_rpy, last_ts_gyro
 
     af = frames.first_or_default(rs.stream.accel)
     gf = frames.first_or_default(rs.stream.gyro)
     if not af or not gf:
-        return cam_quat
+        return np.degrees([0.0, 0.0, 0.0])  # fallback
 
     accel = af.as_motion_frame().get_motion_data()
     gyro  = gf.as_motion_frame().get_motion_data()
     ts    = frames.get_timestamp()
 
     a = np.array([accel.x, accel.y, accel.z])
-    g = np.array([gyro.x,   gyro.y,   gyro.z])
+    g = np.array([gyro.x,   gyro.y,  gyro.z])
 
-    # 1) 최초 호출 → 초기 quaternion을 가속도 기준으로 보정
+    # print(f"[IMU] a: {a}, g: {g}")
+
     if last_ts_gyro is None:
         last_ts_gyro = ts
         cam_quat = calibrate_orientation(a)
         print(f"[Calibrate] Initial cam_quat: {cam_quat}")
-        return cam_quat
+    else:
+        dt = (ts - last_ts_gyro) / 1000.0
+        last_ts_gyro = ts
+        madgwick_filter.sampleperiod = dt
+        cam_quat = madgwick_filter.updateIMU(q=cam_quat, acc=a, gyr=g)
+        cam_rpy = quaternion_to_euler(cam_quat)
 
-    # 2) 이후 프레임마다 Madgwick 업데이트
-    dt = (ts - last_ts_gyro) / 1000.0
-    last_ts_gyro = ts
-    madgwick_filter.sampleperiod = dt
-    cam_quat = madgwick_filter.updateIMU(q=cam_quat, acc=a, gyr=g)
+        print(f"Roll: {cam_rpy[0]:.2f}, Pitch: {cam_rpy[1]:.2f}, Yaw: {cam_rpy[2]:.2f}")
 
-    return cam_quat
+    # 최종 출력: RPY(deg)
+    return cam_rpy
 

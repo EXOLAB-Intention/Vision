@@ -62,7 +62,30 @@ def GetData():
     print(f"==================")
     print(f"Data Saving Done")
 
+def rpy_to_rotmat(cam_rpy):
 
+    cam2world_R = np.array([[0, -1,  0],
+                            [0,  0, -1],
+                            [-1, 0,  0]])
+    
+    rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
+
+    Rx = np.array([
+        [1, 0, 0],
+        [0, np.cos(rx_rad), -np.sin(rx_rad)],
+        [0, np.sin(rx_rad), np.cos(rx_rad)]
+    ])
+    Ry = np.array([
+        [np.cos(ry_rad), 0, np.sin(ry_rad)],
+        [0, 1, 0],
+        [-np.sin(ry_rad), 0, np.cos(ry_rad)]
+    ])
+    Rz = np.array([
+        [np.cos(rz_rad), -np.sin(rz_rad), 0],
+        [np.sin(rz_rad), np.cos(rz_rad), 0],
+        [0, 0, 1]
+    ])
+    return Rz @ Ry @ Rx
 
 
 def main():
@@ -134,6 +157,17 @@ def main():
         # # Gettign stairs step infromation from the clustering
         # colored_planes, stair_steps = classify_planes_and_cluster_steps(planes, camera_rpy)
 
+        
+        
+        
+        R_cam = rpy_to_rotmat(camera_rpy)
+        R_global = R_cam.T  # 지면 기준 절대 방향 (카메라 회전의 역행렬)
+        center = np.asarray(pcd_origin.get_center())
+
+        axis_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)
+        axis_frame.rotate(R_global, center=(0, 0, 0))  # 절대 방향 적용
+        axis_frame.translate(center, relative=False)
+    
 
         stair_steps_np = np.array(stair_steps)  # shape: (N, 2)
         if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2:
@@ -148,6 +182,7 @@ def main():
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
                 vis.add_geometry(sphere)
+                vis.add_geometry(axis_frame)
             added_geometry = True
 
         else:
@@ -156,6 +191,7 @@ def main():
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
                 vis.add_geometry(sphere)
+                vis.add_geometry(axis_frame)
 
         view_ctl.set_zoom(ZOOM)
         vis.poll_events()

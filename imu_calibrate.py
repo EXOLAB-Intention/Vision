@@ -27,8 +27,8 @@ def calibrate(f):
 
     return accel_angle_x, accel_angle_y, accel_angle_z, last_ts_gyro
 
-def calculate_rotation(f, accel_angle_x, accel_angle_y, angleZ, totalgyroangleX, totalgyroangleY, totalgyroangleZ, last_ts_gyro):
-    alpha = 0.98
+def calculate_rotation(f, combinedangleX_prev, combinedangleY_prev, combinedangleZ_prev, totalgyroangleX, totalgyroangleY, totalgyroangleZ, last_ts_gyro):
+
     
     gyro_frame = f.first_or_default(rs.stream.gyro)
     accel_frame = f.first_or_default(rs.stream.accel)
@@ -49,9 +49,9 @@ def calculate_rotation(f, accel_angle_x, accel_angle_y, angleZ, totalgyroangleX,
     dangleY = gyro_angle_y * 57.295791433
     dangleZ = gyro_angle_z * 57.295791433
 
-    totalgyroangleX = accel_angle_x + dangleX
-    totalgyroangleY = accel_angle_y + dangleY
-    totalgyroangleZ = angleZ + dangleZ
+    totalgyroangleX = combinedangleX_prev + dangleX
+    totalgyroangleY = combinedangleY_prev + dangleY
+    totalgyroangleZ = combinedangleZ_prev + dangleZ
 
     accel_angle_x = math.degrees(math.atan2(-accel.x, math.sqrt(accel.y**2 + accel.z**2)))
     accel_angle_y = math.degrees(math.atan2(-accel.z, math.sqrt(accel.x**2 + accel.y**2)))
@@ -59,11 +59,21 @@ def calculate_rotation(f, accel_angle_x, accel_angle_y, angleZ, totalgyroangleX,
     # print(accel.x,", ", accel.y,", ", accel.z,", ")
     # print(accel_angle_x,", ", accel_angle_y,", ",accel_angle_z,", ")
 
+    # alpha = 0.05
+    # low alpha while stationary, high alpha while moving
+    accel_norm = np.linalg.norm(np.array([accel.x, accel.y, accel.z]))
+    alpha = np.tanh(abs(accel_norm - 10))/1.2  # 가속도 값이 10에 가까울수록 alpha는 작아짐
+
     combinedangleX = totalgyroangleX * alpha + accel_angle_x * (1-alpha)
     combinedangleY = totalgyroangleY * alpha + accel_angle_y * (1-alpha)
     combinedangleZ = totalgyroangleZ
 
-    return combinedangleX,combinedangleY,combinedangleZ, totalgyroangleX, totalgyroangleY, totalgyroangleZ, accel_angle_x, accel_angle_y, accel_angle_z, last_ts_gyro
+    combinedangleX_prev = combinedangleX
+    combinedangleY_prev = combinedangleY
+    combinedangleZ_prev = combinedangleZ
+
+
+    return combinedangleX,combinedangleY,combinedangleZ, totalgyroangleX, totalgyroangleY, totalgyroangleZ, combinedangleX_prev, combinedangleY_prev, combinedangleZ_prev, last_ts_gyro
 
 
 def rotate_coordinates(pcd, cam_rpy):
@@ -72,7 +82,7 @@ def rotate_coordinates(pcd, cam_rpy):
 
     cam2world_R = np.array([[0, -1,  0],
                             [0,  0, -1],
-                            [1,  0,  0]])
+                            [-1, 0,  0]])
  
     rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
 
@@ -106,7 +116,7 @@ def rotate_coordinates(pcd, cam_rpy):
 def rotate_vector(vec, cam_rpy):
     cam2world_R = np.array([[0, -1,  0],
                             [0,  0, -1],
-                            [1,  0,  0]])
+                            [-1, 0,  0]])
  
     rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
 
