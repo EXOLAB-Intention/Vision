@@ -1,5 +1,6 @@
 import open3d as o3d
 import numpy as np
+
 """
 ****************hyper parameter**************** 
 voxel_size : voxel 사이즈 설정[cm]
@@ -10,7 +11,6 @@ nb_neighbors : 	각 포인트에 대해 고려할 이웃의 수
 std_ratio : outlier 판단 기준이 되는 표준편차 배수
             큰 값일수록 더 많은 포인트가 inlier로 간주
             작은 값일수록 더 민감하게 outlier를 제거
-            
 """
 
 def create_point_cloud(depth_frame, color_frame, intrinsics, cam_rpy, window_size = 3, order = 2):
@@ -36,7 +36,7 @@ def create_point_cloud(depth_frame, color_frame, intrinsics, cam_rpy, window_siz
 
     points = np.asarray(pcd.points)
     distances = -points[:,2]
-    mask = (distances >= 0.35) & (distances <= 2.0)
+    mask = (distances >= 0.35) & (distances <= 3.5)
     indices = np.where(mask)[0]
     pcd_ = pcd.select_by_index(indices)
     # print(np.asarray(pcd_.points))

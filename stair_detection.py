@@ -139,7 +139,7 @@ def main():
         if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2:
             avg_height = np.mean(stair_steps_np[:, 0])
             avg_depth = np.mean(stair_steps_np[:, 1])
-            print(f"Average height: {avg_height}, Average depth: {avg_depth}")
+            # print(f"Average height: {avg_height}, Average depth: {avg_depth}")
 
 
         # *******************GUI Visualization*********************
@@ -191,6 +191,7 @@ def main():
             combined_display = np.hstack((pcd_image, graph_resized))
 
             cv2.imshow("stairs detection with graph", combined_display)
+            cv2.imshow("dd",color_image)
             key = cv2.waitKey(1)
 
             if key == ord("s"):
