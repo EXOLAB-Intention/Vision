@@ -6,25 +6,9 @@ from ahrs.filters import Madgwick
 
 # pip install ahrs
 
-madgwick_filter = Madgwick()
-q = np.array([1.0, 0.0, 0.0, 0.0])
-gyro_samples = []
-gyro_bias = np.zeros(3)
-initialized = False
-frame_count = 0
-INITIAL_SAMPLES = 50
-GRAVITY_NORM_RANGE = (9.6, 10.0)
+madgwick_filter = Madgwick(sampleperiod=0.01)
+cam_quat  = np.array([1.0, 0.0, 0.0, 0.0])
 last_ts_gyro = None
-
-# global first, totalgyroangleX, totalgyroangleY, totalgyroangleZ, last_ts_gyro, angleX, angleY, angleZ, accel_x, accel_y, accel_z
-# first = True
-# totalgyroangleX = 0
-# totalgyroangleY = 0
-# totalgyroangleZ = 0
-# last_ts_gyro = 0
-# angleX = 0
-# angleY = 180
-# angleZ = -90
 
 # ------- quaternion operations ------- #
 def quaternion_multiply(q1, q2):
@@ -39,6 +23,40 @@ def quaternion_multiply(q1, q2):
 
 def quaternion_conjugate(q):
     return np.array([q[0], -q[1], -q[2], -q[3]])
+
+def quaternion_to_rotation_matrix(q):
+    """q = [w, x, y, z] → 3×3 회전 행렬"""
+    w, x, y, z = q
+    return np.array([
+        [1 - 2*(y*y + z*z),     2*(x*y - w*z),     2*(x*z + w*y)],
+        [    2*(x*y + w*z), 1 - 2*(x*x + z*z),     2*(y*z - w*x)],
+        [    2*(x*z - w*y),     2*(y*z + w*x), 1 - 2*(x*x + y*y)]
+    ])
+
+
+# ------- IMU attitude estimation (quaternion) ------- #
+
+def calibrate_orientation(accel_vec):
+    """
+    accel_vec: 카메라 좌표계에서 측정된 가속도 (np.array([ax,ay,az]))
+    이 벡터가 중력 방향을 가리키므로, 이를 월드 중력 축([0,0,-1])에 맞추는 회전을 quaternion 으로 계산.
+    """
+    # 1. 단위 벡터화
+    g = accel_vec / np.linalg.norm(accel_vec)
+    # 2. 월드 중력 벡터 (Open3D world 기준)
+    gw = np.array([0.0, 0.0, -1.0])
+    # 3. 회전축(axis) = g × gw
+    axis = np.cross(g, gw)
+    if np.linalg.norm(axis) < 1e-6:
+        # 이미 정렬된 상태
+        return np.array([1.0, 0.0, 0.0, 0.0])
+    axis /= np.linalg.norm(axis)
+    # 4. 회전각(angle) = arccos(g·gw)
+    angle = math.acos(np.clip(np.dot(g, gw), -1.0, 1.0))
+    # 5. quaternion 생성
+    w = math.cos(angle/2)
+    x, y, z = axis * math.sin(angle/2)
+    return np.array([w, x, y, z])
 
 
 # ------- vector and point cloud rotation ------ #
@@ -59,119 +77,69 @@ def rotate_vector(vec, cam_quat):
 
     return rotate_vec
 
+# ---- PointCloud 회전 (성능 최적화, 법선/색상 보존) ----
 def rotate_coordinates(pcd, cam_quat):
-    points = np.asarray(pcd.points)
-    rotated_points = np.array([rotate_vector(p, cam_quat) for p in points])
-    rotated_pcd = o3d.geometry.PointCloud()
-    rotated_pcd.points = o3d.utility.Vector3dVector(rotated_points)
-    return rotated_pcd
+    # 원본 배열
+    pts    = np.asarray(pcd.points)
+    normals = np.asarray(pcd.normals) if pcd.has_normals() else None
+    colors  = np.asarray(pcd.colors)  if pcd.has_colors()  else None
+
+    # 좌표계 변환: RealSense → World
+    cam2world_R = np.array([[ 0, -1,  0],
+                            [ 0,  0, -1],
+                            [ 1,  0,  0]])
+    pts_world = (cam2world_R @ pts.T).T
+    if normals is not None:
+        normals_world = (cam2world_R @ normals.T).T
+
+    # quaternion → 회전 행렬
+    R_cam    = quaternion_to_rotation_matrix(cam_quat)
+    # R_total  = R_cam @ cam2world_R  # world→camera or camera→world 순 확인하여 적절히 곱셈
+
+    # 한 번에 벡터화 회전
+    pts_rot = (pts_world @ R_cam.T)
+    pcd2    = o3d.geometry.PointCloud()
+    pcd2.points = o3d.utility.Vector3dVector(pts_rot)
+
+    # 법선 회전
+    if normals is not None:
+        normals_rot = (normals_world @ R_cam.T)
+        pcd2.normals = o3d.utility.Vector3dVector(normals_rot)
+
+    # 색상 유지
+    if colors is not None:
+        pcd2.colors = o3d.utility.Vector3dVector(colors)
+
+    return pcd2
 
 
-# ------- IMU attitude estimation (quaternion) ------- #
 def get_camera_angle(frames):
-    global cam_quat, initialized, gyro_bias, gyro_samples, frame_count, last_ts_gyro
+    global cam_quat, last_ts_gyro
 
-    accel_frame = frames.first_or_default(rs.stream.accel)
-    gyro_frame = frames.first_or_default(rs.stream.gyro)
+    af = frames.first_or_default(rs.stream.accel)
+    gf = frames.first_or_default(rs.stream.gyro)
+    if not af or not gf:
+        return cam_quat
 
-    if not accel_frame or not gyro_frame:
-        return None
+    accel = af.as_motion_frame().get_motion_data()
+    gyro  = gf.as_motion_frame().get_motion_data()
+    ts    = frames.get_timestamp()
 
-    accel = accel_frame.as_motion_frame().get_motion_data()
-    gyro = gyro_frame.as_motion_frame().get_motion_data()
-    ts = frames.get_timestamp()
+    a = np.array([accel.x, accel.y, accel.z])
+    g = np.array([gyro.x,   gyro.y,   gyro.z])
 
-    accel_vec = np.array([accel.x, accel.y, accel.z])
-    gyro_vec = np.array([gyro.x, gyro.y, gyro.z])
-
+    # 1) 최초 호출 → 초기 quaternion을 가속도 기준으로 보정
     if last_ts_gyro is None:
         last_ts_gyro = ts
-        return None
+        cam_quat = calibrate_orientation(a)
+        print(f"[Calibrate] Initial cam_quat: {cam_quat}")
+        return cam_quat
 
+    # 2) 이후 프레임마다 Madgwick 업데이트
     dt = (ts - last_ts_gyro) / 1000.0
     last_ts_gyro = ts
+    madgwick_filter.sampleperiod = dt
+    cam_quat = madgwick_filter.updateIMU(q=cam_quat, acc=a, gyr=g)
 
-    # Initialize gyro bias
-    if not initialized:
-        accel_norm = np.linalg.norm(accel_vec)
-        if GRAVITY_NORM_RANGE[0] <= accel_norm <= GRAVITY_NORM_RANGE[1]:
-            gyro_samples.append(gyro_vec)
-            frame_count += 1
-        if frame_count >= INITIAL_SAMPLES:
-            gyro_bias = np.mean(gyro_samples, axis=0)
-            initialized = True
-            print(f"[Madgwick Init] Gyro bias estimated: {gyro_bias}")
-        return None
+    return cam_quat
 
-    gyro_corrected = gyro_vec - gyro_bias
-    cam_quat = madgwick_filter.updateIMU(q=cam_quat, acc=accel_vec, gyr=gyro_corrected, dt=dt)
-
-    return cam_quat  # [w, x, y, z]
-
-# def calibrate(f):
-#     accel_frame = f.first_or_default(rs.stream.accel)
-#     accel = accel_frame.as_motion_frame().get_motion_data()
-
-#     ts = f.get_timestamp()
-#     last_ts_gyro = ts
-
-#     # accelerometer calculation
-#     accel_angle_x = math.degrees(math.atan2(-accel.x, math.sqrt(accel.y**2 + accel.z**2)))
-#     accel_angle_y = math.degrees(math.atan2(-accel.z, math.sqrt(accel.x**2 + accel.y**2)))
-#     accel_angle_z = 0
-
-#     return accel_angle_x, accel_angle_y, accel_angle_z, last_ts_gyro
-
-# def calculate_rotation(f, accel_angle_x, accel_angle_y, angleZ, totalgyroangleX, totalgyroangleY, totalgyroangleZ, last_ts_gyro):
-#     alpha = 0.98
-    
-#     gyro_frame = f.first_or_default(rs.stream.gyro)
-#     accel_frame = f.first_or_default(rs.stream.accel)
-
-#     accel = accel_frame.as_motion_frame().get_motion_data()
-#     gyro = gyro_frame.as_motion_frame().get_motion_data()
-
-#     ts = f.get_timestamp()
-
-#     dt_gyro = (ts - last_ts_gyro) / 1000
-#     last_ts_gyro = ts
-
-#     gyro_angle_x = gyro.z * dt_gyro
-#     gyro_angle_y = -gyro.x * dt_gyro
-#     gyro_angle_z = -gyro.y * dt_gyro
-
-#     dangleX = gyro_angle_x * 57.295791433
-#     dangleY = gyro_angle_y * 57.295791433
-#     dangleZ = gyro_angle_z * 57.295791433
-
-#     totalgyroangleX = accel_angle_x + dangleX
-#     totalgyroangleY = accel_angle_y + dangleY
-#     totalgyroangleZ = angleZ + dangleZ
-
-#     accel_angle_x = math.degrees(math.atan2(-accel.x, math.sqrt(accel.y**2 + accel.z**2)))
-#     accel_angle_y = math.degrees(math.atan2(-accel.z, math.sqrt(accel.x**2 + accel.y**2)))
-#     accel_angle_z = 0
-#     # print(accel.x,", ", accel.y,", ", accel.z,", ")
-#     # print(accel_angle_x,", ", accel_angle_y,", ",accel_angle_z,", ")
-
-#     combinedangleX = totalgyroangleX * alpha + accel_angle_x * (1-alpha)
-#     combinedangleY = totalgyroangleY * alpha + accel_angle_y * (1-alpha)
-#     combinedangleZ = totalgyroangleZ
-
-#     return combinedangleX,combinedangleY,combinedangleZ, totalgyroangleX, totalgyroangleY, totalgyroangleZ, accel_angle_x, accel_angle_y, accel_angle_z, last_ts_gyro
-
-# def get_camera_angle(frames):
-#     global first, accel_angle_x, accel_angle_y, angleZ, last_ts_gyro, totalgyroangleX, totalgyroangleY, totalgyroangleZ
-
-#     if first:
-#         accel_angle_x, accel_angle_y, angleZ, last_ts_gyro = calibrate(frames)
-#         first = False
-
-#     angleX, angleY, angleZ, totalgyroangleX, totalgyroangleY, totalgyroangleZ, accel_angle_x, accel_angle_y, accel_angle_z, last_ts_gyro = calculate_rotation(
-#         frames, accel_angle_x, accel_angle_y, angleZ, totalgyroangleX, totalgyroangleY, totalgyroangleZ, last_ts_gyro
-#     )
-#     # print(angleX,", ", angleY,", ",angleZ,", ")
-
-#     rotation_angle = angleX, angleY, 0
-
-#     return rotation_angle
