@@ -1,7 +1,7 @@
 import open3d as o3d
 import numpy as np
 from sklearn.cluster import DBSCAN
-from imu_calibrate import rotate_vector
+from imu_calibration import rotate_vector
 import copy
 
 """

@@ -11,7 +11,7 @@ from ultralytics import YOLO
 from collections import deque
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from scipy.signal import savgol_filter
-from imu_calibrate import get_camera_angle
+from imu_calibration import get_camera_angle
 from camera_calibration import get_aligned_frames, get_camera_intrinsics, create_point_cloud
 from plane_detection import segment_planes_ransac, classify_planes, cluster_stairs, classify_planes_and_cluster_steps
 
