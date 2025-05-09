@@ -2,12 +2,15 @@ import pyrealsense2 as rs
 import open3d as o3d
 import numpy as np
 import cv2
-from ultralytics import YOLO
 import os
-from scipy.signal import savgol_filter
-import matplotlib.pyplot as plt
 import time
 import csv
+import matplotlib.pyplot as plt
+
+from ultralytics import YOLO
+from collections import deque
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from scipy.signal import savgol_filter
 from imu_calibrate import get_camera_angle
 from camera_calibration import get_aligned_frames, get_camera_intrinsics, create_point_cloud
 from plane_detection import segment_planes_ransac, classify_planes, cluster_stairs, classify_planes_and_cluster_steps
@@ -19,29 +22,6 @@ Voxel Downsampling : Y
 plane segmentation : RANSAC, Normal Vector
 Outlier Remove : Statical method
 Considering Camera Angle
-
-
-****************hyper parameter**************** 
-voxel_size : voxel 사이즈 설정[cm]
-             너무 작은 voxel size → 노이즈 유지됨.
-             너무 큰 voxel size → 디테일 손실됨.
-nb_neighbors : 	각 포인트에 대해 고려할 이웃의 수
-                예: 20이면 각 포인트 주변의 20개 포인트 기준으로 거리 계산
-std_ratio : outlier 판단 기준이 되는 표준편차 배수
-            큰 값일수록 더 많은 포인트가 inlier로 간주
-            작은 값일수록 더 민감하게 outlier를 제거
-
-distance_threshold : 평면으로 인식할 최소의 인접한 point 간 거리 [cm]
-                     distance_threshold가 너무 작으면 노이즈에 민감해져 평면을 잘게 쪼갬.
-ransac_n : 평면으로 인식할 이웃 point들의 수
-len(rest.points) : 인식할 평면의 개수
-
-****************Plane Detection**************** 
-
-실시간 처리, 속도 중요      --> Region Growing
-정확한 평면 방정식 필요     --> RANSAC
-노이즈가 많음             --> RANSAC
-부드러운 표면 분할 위주     --> Region Growing
 
 """
 
@@ -86,6 +66,8 @@ def GetData():
 
 
 def main():
+
+    # *****************Realsense Setting***********************
     pipeline = rs.pipeline()
     config = rs.config()
     config.enable_stream(rs.stream.depth, W, H, rs.format.z16, 30)
@@ -96,13 +78,12 @@ def main():
 
     pipeline.start(config)
     vis = o3d.visualization.Visualizer()
+    # *********************************************************
 
-
-
-    # *****************GUI Parameter*****************
+    # *******************GUI Setting***************************
     image_with_ocv = True
     rendering = False
-    ZOOM =0.25
+    ZOOM = 0.25
     save_start = False
     flag = True
 
@@ -113,14 +94,34 @@ def main():
     view_ctl = vis.get_view_control()
     added_geometry = False
 
+    fig, ax = plt.subplots(figsize=(16, 4))
+    canvas = FigureCanvas(fig)
+    x_data = deque(maxlen=30)
+    height_data = deque(maxlen=30)
+    depth_data = deque(maxlen=30)
+    line1, = ax.plot([], [], label='Avg Height')
+    line2, = ax.plot([], [], label='Avg Depth')
+    ax.set_ylim(0, 0.5)
+    ax.legend()
+    # *********************************************************
+
     while True:
+
+        avg_height = 0.0
+        avg_depth = 0.0
+
+        # *******************Depth / RGB image aligning************
         depth_frame, color_frame, aligned_frames = get_aligned_frames(pipeline, align)
         if depth_frame is None or color_frame is None:
             continue
 
+
+        # *******************Camera information********************
         camera_rpy = get_camera_angle(aligned_frames)
         intr, pinhole_camera_intrinsic = get_camera_intrinsics(aligned_frames)
 
+
+        # *******************Plane Detection***********************
         pcd_origin, pcd, color_image, depth_image = create_point_cloud(depth_frame, color_frame, pinhole_camera_intrinsic, camera_rpy)
         gray_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
 
@@ -131,7 +132,7 @@ def main():
         colored_planes, stair_steps = classify_planes(planes, camera_rpy)
 
         # # Gettign stairs step infromation from the clustering
-        # colored_planes, stair_steps = classify_planes_and_cluster_steps(merged_planes, camera_rpy)
+        # colored_planes, stair_steps = classify_planes_and_cluster_steps(planes, camera_rpy)
 
 
         stair_steps_np = np.array(stair_steps)  # shape: (N, 2)
@@ -141,12 +142,14 @@ def main():
             print(f"Average height: {avg_height}, Average depth: {avg_depth}")
 
 
+        # *******************GUI Visualization*********************
         if not added_geometry:
             for plane, sphere in colored_planes:
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
                 vis.add_geometry(sphere)
             added_geometry = True
+
         else:
             vis.clear_geometries()
             for plane, sphere in colored_planes:
@@ -160,12 +163,34 @@ def main():
 
         if image_with_ocv:
             pcd_image = np.asarray(vis.capture_screen_float_buffer(do_render=True))
+            pcd_image = cv2.cvtColor(pcd_image, cv2.COLOR_RGB2BGR)
             pcd_image = (pcd_image * 255).astype(np.uint8)
             
             color_image_resized = cv2.resize(color_image, (pcd_image.shape[1], pcd_image.shape[0]))
             stacked = np.hstack((color_image_resized, pcd_image))
 
-            cv2.imshow("stairs detection", stacked)
+
+            # *******************Stair Step Information visualization*********************
+            t = time.time()
+            x_data.append(t)
+            height_data.append(avg_height)
+            depth_data.append(avg_depth)
+
+            line1.set_data(x_data, height_data)
+            line2.set_data(x_data, depth_data)
+
+            ax.relim()
+            ax.autoscale_view()
+
+            canvas.draw()
+            buf = canvas.buffer_rgba()
+            graph_image = np.asarray(buf)
+            graph_image = cv2.cvtColor(graph_image, cv2.COLOR_RGBA2BGR)
+
+            graph_resized = cv2.resize(graph_image, (1280, pcd_image.shape[0]))
+            combined_display = np.hstack((pcd_image, graph_resized))
+
+            cv2.imshow("stairs detection with graph", combined_display)
             key = cv2.waitKey(1)
 
             if key == ord("s"):

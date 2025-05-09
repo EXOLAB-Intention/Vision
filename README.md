@@ -8,4 +8,4 @@ This project uses an RGB-D camera to detect the height and width of stairs. It p
 
 ## How to start
 - conda env create -f stair_detection.yml
-- python stair_detection_ver4.py
+- python stair_detection_ver.py
