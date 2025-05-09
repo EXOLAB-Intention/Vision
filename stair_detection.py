@@ -11,7 +11,7 @@ from ultralytics import YOLO
 from collections import deque
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from scipy.signal import savgol_filter
-from imu_calibrate import get_camera_angle
+from imu_calibrate import get_camera_angle, rpy_to_rotmat
 from camera_calibration import get_aligned_frames, get_camera_intrinsics, create_point_cloud
 from plane_detection import segment_planes_ransac, classify_planes, cluster_stairs, classify_planes_and_cluster_steps
 
@@ -120,6 +120,14 @@ def main():
         camera_rpy = get_camera_angle(aligned_frames)
         intr, pinhole_camera_intrinsic = get_camera_intrinsics(aligned_frames)
 
+        R_cam = rpy_to_rotmat(camera_rpy)
+        R_global = R_cam.T  # 지면 기준 절대 방향 (카메라 회전의 역행렬)
+        center = np.asarray(pcd_origin.get_center())
+
+        axis_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)
+        axis_frame.rotate(R_global, center=(0, 0, 0))  # 절대 방향 적용
+        axis_frame.translate(center, relative=False)
+
 
         # *******************Plane Detection***********************
         pcd_origin, pcd, color_image, depth_image = create_point_cloud(depth_frame, color_frame, pinhole_camera_intrinsic, camera_rpy)
@@ -139,7 +147,7 @@ def main():
         if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2:
             avg_height = np.mean(stair_steps_np[:, 0])
             avg_depth = np.mean(stair_steps_np[:, 1])
-            print(f"Average height: {avg_height}, Average depth: {avg_depth}")
+            # print(f"Average height: {avg_height}, Average depth: {avg_depth}")
 
 
         # *******************GUI Visualization*********************
@@ -148,6 +156,7 @@ def main():
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
                 vis.add_geometry(sphere)
+                vis.add_geometry(axis_frame)
             added_geometry = True
 
         else:
@@ -156,6 +165,7 @@ def main():
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
                 vis.add_geometry(sphere)
+                vis.add_geometry(axis_frame)
 
         view_ctl.set_zoom(ZOOM)
         vis.poll_events()
@@ -191,6 +201,7 @@ def main():
             combined_display = np.hstack((pcd_image, graph_resized))
 
             cv2.imshow("stairs detection with graph", combined_display)
+            cv2.imshow("dd",color_image)
             key = cv2.waitKey(1)
 
             if key == ord("s"):

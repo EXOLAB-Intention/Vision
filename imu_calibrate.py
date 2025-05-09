@@ -76,14 +76,11 @@ def calculate_rotation(f, combinedangleX_prev, combinedangleY_prev, combinedangl
     return combinedangleX,combinedangleY,combinedangleZ, totalgyroangleX, totalgyroangleY, totalgyroangleZ, combinedangleX_prev, combinedangleY_prev, combinedangleZ_prev, last_ts_gyro
 
 
-def rotate_coordinates(pcd, cam_rpy):
-    points = np.asarray(pcd.points)
-    cam_coordinates = [np.zeros(points.shape[0]), 3]
-
+def rpy_to_rotmat(cam_rpy):
     cam2world_R = np.array([[0, -1,  0],
                             [0,  0, -1],
-                            [-1, 0,  0]])
- 
+                            [-1, 0,  0]]) # Fixed at 2025.05.09
+    
     rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
 
     Rx = np.array([
@@ -103,9 +100,37 @@ def rotate_coordinates(pcd, cam_rpy):
         [np.sin(rz_rad), np.cos(rz_rad), 0],
         [0, 0, 1]
     ])
+    return Rz @ Ry @ Rx
 
-    R = Rz @ Ry @ Rx
+def rotate_coordinates(pcd, cam_rpy):
+    points = np.asarray(pcd.points)
+    cam_coordinates = [np.zeros(points.shape[0]), 3]
 
+    # cam2world_R = np.array([[0, -1,  0],
+    #                         [0,  0, -1],
+    #                         [-1, 0,  0]])
+ 
+    # rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
+
+    # Rx = np.array([
+    #     [1, 0, 0],
+    #     [0, np.cos(rx_rad), -np.sin(rx_rad)],
+    #     [0, np.sin(rx_rad), np.cos(rx_rad)]
+    # ])
+
+    # Ry = np.array([
+    #     [np.cos(ry_rad), 0, np.sin(ry_rad)],
+    #     [0, 1, 0],
+    #     [-np.sin(ry_rad), 0, np.cos(ry_rad)]
+    # ])
+
+    # Rz = np.array([
+    #     [np.cos(rz_rad), -np.sin(rz_rad), 0],
+    #     [np.sin(rz_rad), np.cos(rz_rad), 0],
+    #     [0, 0, 1]
+    # ])
+
+    R = rpy_to_rotmat(cam_rpy)
     rotated_point = points @ R.T
 
     rotated_pcd = o3d.geometry.PointCloud()
@@ -114,30 +139,30 @@ def rotate_coordinates(pcd, cam_rpy):
     return rotated_pcd
 
 def rotate_vector(vec, cam_rpy):
-    cam2world_R = np.array([[0, -1,  0],
-                            [0,  0, -1],
-                            [-1, 0,  0]])
+    # cam2world_R = np.array([[0, -1,  0],
+    #                         [0,  0, -1],
+    #                         [-1, 0,  0]])
  
-    rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
+    # rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
 
-    Rx = np.array([
-        [1, 0, 0],
-        [0, np.cos(rx_rad), -np.sin(rx_rad)],
-        [0, np.sin(rx_rad), np.cos(rx_rad)]
-    ])
+    # Rx = np.array([
+    #     [1, 0, 0],
+    #     [0, np.cos(rx_rad), -np.sin(rx_rad)],
+    #     [0, np.sin(rx_rad), np.cos(rx_rad)]
+    # ])
 
-    Ry = np.array([
-        [np.cos(ry_rad), 0, np.sin(ry_rad)],
-        [0, 1, 0],
-        [-np.sin(ry_rad), 0, np.cos(ry_rad)]
-    ])
+    # Ry = np.array([
+    #     [np.cos(ry_rad), 0, np.sin(ry_rad)],
+    #     [0, 1, 0],
+    #     [-np.sin(ry_rad), 0, np.cos(ry_rad)]
+    # ])
 
-    Rz = np.array([
-        [np.cos(rz_rad), -np.sin(rz_rad), 0],
-        [np.sin(rz_rad), np.cos(rz_rad), 0],
-        [0, 0, 1]
-    ])
-    R = Rz @ Ry @ Rx
+    # Rz = np.array([
+    #     [np.cos(rz_rad), -np.sin(rz_rad), 0],
+    #     [np.sin(rz_rad), np.cos(rz_rad), 0],
+    #     [0, 0, 1]
+    # ])
+    R = R = rpy_to_rotmat(cam_rpy)
 
     rotated_vec = R @ vec
 
