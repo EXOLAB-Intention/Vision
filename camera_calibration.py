@@ -28,17 +28,21 @@ def create_point_cloud(depth_frame, color_frame, intrinsics, cam_rpy, window_siz
     pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
         rgbd_image, intrinsics)
     
+
+    points = np.asarray(pcd.points)
+    distances = points[:,2]
+    mask = (distances >= 0.5) & (distances <= 2.0)
+    indices = np.where(mask)[0]
+    pcd = pcd.select_by_index(indices)
+
+
     pcd.transform([[1, 0, 0, 0],
                    [0, -1, 0, 0],
                    [0, 0, -1, 0],
                    [0, 0, 0, 1]])
     
 
-    points = np.asarray(pcd.points)
-    distances = -points[:,2]
-    mask = (distances >= 0.35) & (distances <= 3.5)
-    indices = np.where(mask)[0]
-    pcd_ = pcd.select_by_index(indices)
+
     # print(np.asarray(pcd_.points))
 
 
@@ -53,9 +57,9 @@ def create_point_cloud(depth_frame, color_frame, intrinsics, cam_rpy, window_siz
 
     # pcd.points = o3d.utility.Vector3dVector(filtered_points)
 
-    voxel_size = 0.04
-    pcd_ = pcd_.voxel_down_sample(voxel_size=voxel_size)
-    pcd_, ind = pcd_.remove_statistical_outlier(nb_neighbors=20, std_ratio=1.0) # std_ratio=2.0
+    voxel_size = 0.05
+    pcd_ = pcd.voxel_down_sample(voxel_size=voxel_size)
+    # pcd_, ind = pcd_.remove_statistical_outlier(nb_neighbors=50, std_ratio=1.0) # std_ratio=2.0
 
     # pcd = rotate_coordinates(pcd, cam_rpy)
 

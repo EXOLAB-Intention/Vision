@@ -11,7 +11,7 @@ from ultralytics import YOLO
 from collections import deque
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from scipy.signal import savgol_filter
-from imu_calibrate import get_camera_angle
+from imu_calibrate import get_camera_angle, rotate_coordinates
 from camera_calibration import get_aligned_frames, get_camera_intrinsics, create_point_cloud
 from plane_detection import segment_planes_ransac, classify_planes, cluster_stairs, classify_planes_and_cluster_steps
 
@@ -65,7 +65,7 @@ def GetData():
 def rpy_to_rotmat(cam_rpy):
 
     cam2world_R = np.array([[0, -1,  0],
-                            [0,  0, -1],
+                            [0,  0, 1],
                             [-1, 0,  0]])
     
     rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
@@ -150,10 +150,13 @@ def main():
 
         # Using Ransac
         points = np.asarray(pcd.points)  # PointCloud 객체 → NumPy 배열
-        planes = segment_planes_ransac(points)
+        planes = segment_planes_ransac(points, camera_rpy)
 
         # Getting stairs step information from the distance btw horizontal and vertical plane
         colored_planes, stair_steps = classify_planes(planes, camera_rpy)
+        # if len(colored_planes) > 0 and len(colored_planes[0]) > 0:
+        #     rotate_coordinates(colored_planes[0][0], camera_rpy)
+
 
         # # Gettign stairs step infromation from the clustering
         # colored_planes, stair_steps = classify_planes_and_cluster_steps(planes, camera_rpy)
@@ -183,7 +186,7 @@ def main():
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
                 vis.add_geometry(sphere)
-                # vis.add_geometry(axis_frame)
+                vis.add_geometry(axis_frame)
             added_geometry = True
 
         else:
@@ -192,7 +195,7 @@ def main():
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
                 vis.add_geometry(sphere)
-                # vis.add_geometry(axis_frame)
+                vis.add_geometry(axis_frame)
 
         view_ctl.set_zoom(ZOOM)
         vis.poll_events()

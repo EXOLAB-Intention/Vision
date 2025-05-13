@@ -23,16 +23,18 @@ ransac_n : 평면으로 인식할 이웃 point들의 수
 import open3d as o3d
 import numpy as np
 
-DistanceThre = 0.05   # [m]
+DistanceThre = 0.06   # [m]
 AngleThre = 15        # [deg]
 
 
 def ransac_plane_fit_limited_radius(points,
+                                    cam_rpy,
                                     threshold=0.03,
                                     num_ransac_points=3,
                                     num_iterations=100,
                                     min_inliers=150,
-                                    sample_radius=0.05):
+                                    sample_radius=0.05,
+                                    sample_points_var_ratio = 0.08):
     best_plane = []
     best_inliers = []
 
@@ -40,15 +42,20 @@ def ransac_plane_fit_limited_radius(points,
     kdtree = cKDTree(points)
 
     for _ in range(num_iterations):
-        var = [0,0,0]
+        sample_cam_coord = [0,0,0]
 
         center_idx = np.random.randint(num_points)
         center = points[center_idx]
 
+        # # -----------points sampling in circle------------
         # distances_from_center = np.linalg.norm(points - center, axis=1)
         # candidate_indices = np.where(distances_from_center < sample_radius)[0]
 
-        candidate_indices = kdtree.query_ball_point(center, r=sample_radius)
+        # -----------points sampling in circle------------
+        candidate_indices = kdtree.query_ball_point(center, r=sample_radius) 
+
+        # # -----------points sampling in limited number of points------------
+        # _, candidate_indices = kdtree.query(center, k=5)
 
 
         if len(candidate_indices) < num_ransac_points:
@@ -56,35 +63,36 @@ def ransac_plane_fit_limited_radius(points,
 
         sample_indices = np.random.choice(candidate_indices, num_ransac_points, replace=False)
         sample = points[sample_indices]
-        mean = np.mean(sample, axis =0)
 
-        var[0] = np.mean((sample[:, 0] - mean[0]) ** 2)
-        var[1] = np.mean((sample[:, 1] - mean[1]) ** 2)
-        var[2] = np.mean((sample[:, 2] - mean[2]) ** 2)
-        var_sorted = np.sort(var)
-        ratio  = var_sorted[0] / np.sum(var_sorted)
+        sample_cam_coord[0] = rotate_vector(sample[0], cam_rpy)
+        sample_cam_coord[1] = rotate_vector(sample[1], cam_rpy)
+        sample_cam_coord[2] = rotate_vector(sample[2], cam_rpy)
+
+        var = np.var(sample_cam_coord, axis=0)
+        ratio = np.min(var) / np.sum(var)
 
         # mean = np.mean(sample, axis=0)
         # sample_centered = sample - mean
         # cov_matrix = np.cov(sample_centered.T, bias=True)
         # eigvals, eigvecs = np.linalg.eigh(cov_matrix)
         # eigvals = np.sort(eigvals)
-        # print(eigvals)
         # ratio = eigvals[0] / (eigvals[0] + eigvals[1] + eigvals[2])
         # # ratio = eigvals[0] / np.linalg.norm(eigvals)
         
-        if abs(ratio) > 0.08:
+        if abs(ratio) > sample_points_var_ratio:
             continue
-        print(ratio)
+        # print(ratio)
 
-        p1, p2, p3 = sample
-        normal = np.cross(p2 - p1, p3 - p1)
-        normal /= np.linalg.norm(normal)
-        if np.linalg.norm(normal) == 0:
+        v1, v2 = sample[1] - sample[0], sample[2] - sample[0]
+        normal = np.cross(v1, v2)
+        norm_val = np.linalg.norm(normal)
+        if norm_val == 0:
             continue
+        normal /= norm_val
+
 
         a, b, c = normal
-        d = -np.dot(normal, p1)
+        d = -np.dot(normal, sample[0])
 
         distances = np.abs((points @ normal) + d) / np.linalg.norm(normal)
         inlier_indices = np.where(distances < threshold)[0]
@@ -97,13 +105,16 @@ def ransac_plane_fit_limited_radius(points,
     return best_plane, inlier_points, best_inliers
 
 def segment_planes_ransac(points,
+                          cam_rpy,
                           distance_threshold=0.01,
-                          num_iterations=150,
+                          num_iterations=50,
                           min_ratio=0.01,
                           min_num_points=150,
-                          max_planes=30,
-                          sampling_radius = 0.05):
+                          max_planes=12,
+                          sampling_radius = 0.05,
+                          sample_points_var_ratio = 0.005):
 
+    # points = rotate_vector(points, cam_rpy)
     planes = []
     rest_points = points.copy()
     total_points = points.shape[0]
@@ -111,10 +122,12 @@ def segment_planes_ransac(points,
     while len(rest_points) > min_num_points and len(planes) < max_planes:
 
         result = ransac_plane_fit_limited_radius(rest_points,
-                                  threshold=distance_threshold,
-                                  num_iterations=num_iterations,
-                                  min_inliers=min(min_ratio * total_points, min_num_points),
-                                  sample_radius = sampling_radius)
+                                                 cam_rpy,
+                                                 threshold=distance_threshold,
+                                                 num_iterations=num_iterations,
+                                                 min_inliers=min(min_ratio * total_points, min_num_points),
+                                                 sample_radius = sampling_radius,
+                                                 sample_points_var_ratio = sample_points_var_ratio)
 
         if result is None:
             break
@@ -145,8 +158,6 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
     merged_planes = []
 
     used = [False] * len(planes)
-    print("-----------------------------------")
-    print(f"planes : {len(planes)}")
 
     for i in range(len(planes)):
         if used[i]:
@@ -192,7 +203,6 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
             merged_pcd.normals = planes[i][1].normals
 
         merged_planes.append((planes[i][0], merged_pcd))
-    print(f"merged planes : {len(merged_planes)}")
 
     for plane_model, plane in merged_planes:
         
@@ -202,25 +212,24 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
         normal = np.array(plane_model[:3])
         normal = rotate_vector(normal, cam_ori)
         normal /= np.linalg.norm(normal)
-        # center = np.mean(np.asarray(plane.points), axis=0)
         center = np.mean(np.asarray(plane.points), axis=0)
 
         sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
         sphere.translate(center)
 
-        center_rotated = rotate_vector(center, cam_ori)
+        center = rotate_vector(center, cam_ori)
 
         # horizontal : red
         if abs(normal[1]) > 0.75 and abs(normal[2]) < 0.25:
             plane.paint_uniform_color([1, 0, 0])
             sphere.paint_uniform_color([0, 0, 0])
-            horizontals.append(center_rotated)
+            horizontals.append(center)
 
         # vertical : blue
         elif abs(normal[1]) < 0.25 and abs(normal[2]) > 0.75:
             plane.paint_uniform_color([0, 0, 1])
             sphere.paint_uniform_color([0, 0, 0])
-            verticals.append(center_rotated)
+            verticals.append(center)
 
         else:
             plane.paint_uniform_color([0, 1, 0])

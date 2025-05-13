@@ -78,10 +78,9 @@ def calculate_rotation(f, combinedangleX_prev, combinedangleY_prev, combinedangl
 
 def rotate_coordinates(pcd, cam_rpy):
     points = np.asarray(pcd.points)
-    cam_coordinates = [np.zeros(points.shape[0]), 3]
 
     cam2world_R = np.array([[0, -1,  0],
-                            [0,  0, -1],
+                            [0,  0, 1],
                             [-1, 0,  0]])
  
     rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
@@ -106,16 +105,17 @@ def rotate_coordinates(pcd, cam_rpy):
 
     R = Rz @ Ry @ Rx
 
-    rotated_point = points @ R.T
+    rotated_point = np.dot(points, R)
 
-    rotated_pcd = o3d.geometry.PointCloud()
-    rotated_pcd.points = o3d.utility.Vector3dVector(rotated_point)
+    # rotated_pcd = o3d.geometry.PointCloud()
+    # rotated_pcd.points = o3d.utility.Vector3dVector(rotated_point)
+    pcd.points = o3d.utility.Vector3dVector(rotated_point)
+    
 
-    return rotated_pcd
 
 def rotate_vector(vec, cam_rpy):
     cam2world_R = np.array([[0, -1,  0],
-                            [0,  0, -1],
+                            [0,  0, 1],
                             [-1, 0,  0]])
  
     rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
@@ -139,7 +139,8 @@ def rotate_vector(vec, cam_rpy):
     ])
     R = Rz @ Ry @ Rx
 
-    rotated_vec = R @ vec
+    # rotated_vec = R @ vec
+    rotated_vec = np.dot(vec, R.T)
 
     return rotated_vec
 
