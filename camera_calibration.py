@@ -53,7 +53,7 @@ def create_point_cloud(depth_frame, color_frame, intrinsics, cam_rpy, window_siz
 
     # pcd.points = o3d.utility.Vector3dVector(filtered_points)
 
-    voxel_size = 0.03
+    voxel_size = 0.04
     pcd_ = pcd_.voxel_down_sample(voxel_size=voxel_size)
     pcd_, ind = pcd_.remove_statistical_outlier(nb_neighbors=20, std_ratio=1.0) # std_ratio=2.0
 

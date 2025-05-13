@@ -149,7 +149,8 @@ def main():
         gray_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
 
         # Using Ransac
-        planes = segment_planes_ransac(pcd)
+        points = np.asarray(pcd.points)  # PointCloud 객체 → NumPy 배열
+        planes = segment_planes_ransac(points)
 
         # Getting stairs step information from the distance btw horizontal and vertical plane
         colored_planes, stair_steps = classify_planes(planes, camera_rpy)
@@ -182,7 +183,7 @@ def main():
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
                 vis.add_geometry(sphere)
-                vis.add_geometry(axis_frame)
+                # vis.add_geometry(axis_frame)
             added_geometry = True
 
         else:
@@ -191,7 +192,7 @@ def main():
                 plane = plane + pcd_origin if rendering else plane
                 vis.add_geometry(plane)
                 vis.add_geometry(sphere)
-                vis.add_geometry(axis_frame)
+                # vis.add_geometry(axis_frame)
 
         view_ctl.set_zoom(ZOOM)
         vis.poll_events()
@@ -253,4 +254,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
