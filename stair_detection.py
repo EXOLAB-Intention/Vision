@@ -121,11 +121,11 @@ def main():
         intr, pinhole_camera_intrinsic = get_camera_intrinsics(aligned_frames)
 
         R_cam = rpy_to_rotmat(camera_rpy)
-        R_global = R_cam.T  # 지면 기준 절대 방향 (카메라 회전의 역행렬)
+        R_global = R_cam.T
         center = np.asarray(pcd_origin.get_center())
 
         axis_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)
-        axis_frame.rotate(R_global, center=(0, 0, 0))  # 절대 방향 적용
+        axis_frame.rotate(R_global, center=(0, 0, 0))
         axis_frame.translate(center, relative=False)
 
 

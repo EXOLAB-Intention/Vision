@@ -6,7 +6,7 @@ from ahrs.filters import Madgwick
 
 # pip install ahrs
 
-madgwick_filter = Madgwick(sampleperiod=0.01, beta=0.05)
+madgwick_filter = Madgwick(sampleperiod=0.1, beta=0.05)
 cam_quat  = np.array([1.0, 0.0, 0.0, 0.0])
 cam_rpy = np.array([0.0, 0.0, 0.0])
 last_ts_gyro = None
@@ -38,7 +38,7 @@ def quaternion_to_euler(q):
     qw, qx, qy, qz = q
 
     # φ: Roll
-    phi = math.atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx*qx + qy*qy))
+    phi = math.atan2(2 * (qw * qx + qy * qz), 1 - 2 * (qx * qx + qy * qy))
 
     # θ: Pitch (주의: asin 도 괜찮지만 위키피디아식 사용)
     inner = math.sqrt(1 + 2 * (qw * qy - qx * qz))
@@ -46,7 +46,7 @@ def quaternion_to_euler(q):
     theta = -math.pi / 2 + 2 * math.atan2(inner, outer)
 
     # ψ: Yaw
-    psi = math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy*qy + qz*qz))
+    psi = math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
 
     return np.degrees([phi, theta, psi])
 
@@ -137,7 +137,7 @@ def get_camera_angle(frames):
     ts    = frames.get_timestamp()
 
     a = np.array([accel.x, accel.y, accel.z])
-    g = np.array([gyro.x,   gyro.y,  gyro.z])
+    g = np.array([ gyro.x,  gyro.y,  gyro.z])
 
     # print(f"[IMU] a: {a}, g: {g}")
 
