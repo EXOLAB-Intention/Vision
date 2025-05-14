@@ -42,21 +42,23 @@ def ransac_plane_fit_limited_radius(points,
     kdtree = cKDTree(points)
 
     for _ in range(num_iterations):
+
         sample_cam_coord = [0,0,0]
 
         center_idx = np.random.randint(num_points)
         center = points[center_idx]
 
-        # # -----------points sampling in circle------------
-        # distances_from_center = np.linalg.norm(points - center, axis=1)
-        # candidate_indices = np.where(distances_from_center < sample_radius)[0]
-
         # -----------points sampling in circle------------
-        candidate_indices = kdtree.query_ball_point(center, r=sample_radius) 
+        # candidate_indices = kdtree.query_ball_point(center, r=sample_radius)
+        # 시간복잡도 ≈ O(log N + M)
+        # N: KDTree에 저장된 포인트 수
+        # M: 반경 r 안에 존재하는 이웃의 수
 
         # # -----------points sampling in limited number of points------------
-        # _, candidate_indices = kdtree.query(center, k=5)
-
+        _, candidate_indices = kdtree.query(center, k=50)
+        # 시간복잡도 ≈ O(log N + M)
+        # N: KDTree에 저장된 포인트 수
+        # M: 찾을 최근접 이웃 수
 
         if len(candidate_indices) < num_ransac_points:
             continue
@@ -68,16 +70,18 @@ def ransac_plane_fit_limited_radius(points,
         sample_cam_coord[1] = rotate_vector(sample[1], cam_rpy)
         sample_cam_coord[2] = rotate_vector(sample[2], cam_rpy)
 
+        # -----------compare sampling points with variance of each axis------------
         var = np.var(sample_cam_coord, axis=0)
         ratio = np.min(var) / np.sum(var)
 
-        # mean = np.mean(sample, axis=0)
-        # sample_centered = sample - mean
+        # # -----------compare sampling points with eigen value of covariance matrix------------
+        # mean = np.mean(sample_cam_coord, axis=0)
+        # sample_centered = sample_cam_coord - mean
         # cov_matrix = np.cov(sample_centered.T, bias=True)
         # eigvals, eigvecs = np.linalg.eigh(cov_matrix)
         # eigvals = np.sort(eigvals)
         # ratio = eigvals[0] / (eigvals[0] + eigvals[1] + eigvals[2])
-        # # ratio = eigvals[0] / np.linalg.norm(eigvals)
+        # print(ratio)
         
         if abs(ratio) > sample_points_var_ratio:
             continue
@@ -89,30 +93,71 @@ def ransac_plane_fit_limited_radius(points,
         if norm_val == 0:
             continue
         normal /= norm_val
+        normal_rot = rotate_vector(normal, cam_rpy)
 
+        # a, b, c = normal
+        # d = -np.dot(normal, sample[0])
 
-        a, b, c = normal
-        d = -np.dot(normal, sample[0])
+        # distances = np.abs((points @ normal) + d) / np.linalg.norm(normal)
+        # inlier_indices = np.where(distances < threshold)[0]
 
-        distances = np.abs((points @ normal) + d) / np.linalg.norm(normal)
-        inlier_indices = np.where(distances < threshold)[0]
+        # # plane_point_center = np.mean(np.asarray(points)[inlier_indices], axis=0)
+        # # _, plane_point_indices = kdtree.query(plane_point_center, k=4)
 
-        if len(inlier_indices) > len(best_inliers):
-            best_inliers = inlier_indices
-            best_plane = (a, b, c, d)
+        # # neighbor_points = np.asarray(points)[plane_point_indices]
+        # # distances = np.linalg.norm(neighbor_points - plane_point_center, axis=1)
+        # # mean_distance = np.mean(distances)
+
+        # # if mean_distance > 0.05:
+        # #     continue
+
+        # if len(inlier_indices) > len(best_inliers):
+        #     best_inliers = inlier_indices
+        #     best_plane = (a, b, c, d)   
+
+        normal_dot_product_horizon  = abs(np.dot([0,1,0], normal_rot))
+        normal_dot_product_vertical = abs(np.dot([0,0,1], normal_rot))
+
+        if normal_dot_product_horizon > 0.9 or normal_dot_product_vertical > 0.9:
+            a, b, c = normal
+            d = -np.dot(normal, sample[0])
+
+            distances = np.abs((points @ normal) + d) / np.linalg.norm(normal)
+            inlier_indices = np.where(distances < threshold)[0]
+            
+            kdtree2 = cKDTree(points[inlier_indices])
+
+            plane_point_center = np.mean(np.asarray(points)[inlier_indices], axis=0)
+            _, plane_point_indices = kdtree2.query(plane_point_center, k=4)
+
+            neighbor_points = np.asarray(points)[plane_point_indices]
+            distances = np.linalg.norm(neighbor_points - plane_point_center, axis=1)
+            mean_distance = np.mean(distances)
+            print(mean_distance)
+
+            if mean_distance > 3.0:
+                continue
+
+            if len(inlier_indices) > len(best_inliers):
+                best_inliers = inlier_indices
+                best_plane = (a, b, c, d)   
+        else:
+            continue
+
+        
 
     inlier_points = points[best_inliers]
     return best_plane, inlier_points, best_inliers
 
 def segment_planes_ransac(points,
                           cam_rpy,
-                          distance_threshold=0.01,
+                          distance_threshold=0.02,
                           num_iterations=50,
                           min_ratio=0.01,
                           min_num_points=150,
                           max_planes=12,
                           sampling_radius = 0.05,
-                          sample_points_var_ratio = 0.005):
+                          sample_points_var_ratio = 0.05):
 
     # points = rotate_vector(points, cam_rpy)
     planes = []
@@ -180,18 +225,6 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
                 merged.append(planes[j][1])
                 used[j] = True
 
-        # merged_pcd = copy.deepcopy(merged[0])
-        # for m in merged[1:]:
-        #     merged_pcd += m
-        
-        # merged_pcd_legacy = o3d.geometry.PointCloud()
-        # merged_pcd_legacy.points = merged_pcd.points
-
-        # if merged_pcd.has_colors():
-        #     merged_pcd_legacy.colors = merged_pcd.colors
-        # if merged_pcd.has_normals():
-        #     merged_pcd_legacy.normals = merged_pcd.normals
-
         merged_np = np.vstack(merged)
 
         merged_pcd = o3d.geometry.PointCloud()
@@ -206,9 +239,6 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
 
     for plane_model, plane in merged_planes:
         
-        # plane_o3d = o3d.geometry.PointCloud()
-        # plane_o3d.points = o3d.utility.Vector3dVector(plane)
-
         normal = np.array(plane_model[:3])
         normal = rotate_vector(normal, cam_ori)
         normal /= np.linalg.norm(normal)
@@ -219,14 +249,16 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
 
         center = rotate_vector(center, cam_ori)
 
+
+
         # horizontal : red
-        if abs(normal[1]) > 0.75 and abs(normal[2]) < 0.25:
+        if abs(normal[1]) > 0.9 and abs(normal[2]) < 0.1:
             plane.paint_uniform_color([1, 0, 0])
             sphere.paint_uniform_color([0, 0, 0])
             horizontals.append(center)
 
         # vertical : blue
-        elif abs(normal[1]) < 0.25 and abs(normal[2]) > 0.75:
+        elif abs(normal[1]) < 0.1 and abs(normal[2]) > 0.9:
             plane.paint_uniform_color([0, 0, 1])
             sphere.paint_uniform_color([0, 0, 0])
             verticals.append(center)
@@ -259,115 +291,4 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
     for i in range(num_steps):
         stair_steps.append((heights[i], depths[i]))
 
-    return colored_planes, stair_steps
-
-
-
-
-
-
-
-
-
-
-
-
-
-def cluster_stairs(horizontals, verticals, eps, min_samples):
-    if not horizontals or not verticals:
-        return []
-
-    z_coords = np.array([[center[2]] for center in horizontals])
-    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(z_coords)
-    labels = clustering.labels_
-
-    cluster_map = {}
-    for label, h_center in zip(labels, horizontals):
-        if label not in cluster_map:
-            cluster_map[label] = []
-        cluster_map[label].append(h_center)
-
-    stair_steps = []
-
-    for label, h_centers in cluster_map.items():
-        cluster_center = np.mean(h_centers, axis=0)
-
-        min_dist = float('inf')
-        closest_v = None
-        for v_center in verticals:
-            dist = np.linalg.norm(cluster_center - v_center)
-            if dist < min_dist:
-                min_dist = dist
-                closest_v = v_center
-
-        if closest_v is not None:
-            height = abs(cluster_center[1] - closest_v[1])
-            depth = abs(cluster_center[2] - closest_v[2])
-            stair_steps.append((height, depth))
-
-    return stair_steps
-
-def classify_planes_and_cluster_steps(planes, cam_ori, angle_threshold = AngleThre, d_threshold = DistanceThre):
-    colored_planes = []
-    horizontals = []
-    verticals = []
-
-    merged_planes = []
-
-    used = [False] * len(planes)
-
-    for i in range(len(planes)):
-        if used[i]:
-            continue
-        merged = [planes[i][1]]
-        normal_i = np.array(planes[i][0][:3])
-        normal_i /= np.linalg.norm(normal_i)
-        d_i = planes[i][0][3]
-
-        for j in range(i + 1, len(planes)):
-            if used[j]:
-                continue
-            normal_j = np.array(planes[j][0][:3])
-            normal_j /= np.linalg.norm(normal_j)
-            d_j = planes[j][0][3]
-
-            angle = np.arccos(np.clip(np.dot(normal_i, normal_j), -1.0, 1.0)) * 180 / np.pi
-            if angle < angle_threshold and abs(d_i - d_j) < d_threshold:
-                merged.append(planes[j][1])
-                used[j] = True
-
-        merged_pcd = copy.deepcopy(merged[0])
-        for m in merged[1:]:
-            merged_pcd += m
-        merged_planes.append((planes[i][0], merged_pcd))
-
-    for plane_model, plane in merged_planes:
-        normal = np.array(plane_model[:3])
-        normal = rotate_vector(normal, cam_ori)
-        normal /= np.linalg.norm(normal)
-        center = np.mean(np.asarray(plane.points), axis=0)
-
-        sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
-        sphere.translate(center)
-        center = rotate_vector(center, cam_ori)
-
-        # horizontal : red
-        if abs(normal[1]) > 0.75 and abs(normal[2]) < 0.25:
-            plane.paint_uniform_color([1, 0, 0])
-            sphere.paint_uniform_color([0, 0, 0])
-            horizontals.append(center)
-
-        # vertical : blue
-        elif abs(normal[1]) < 0.25 and abs(normal[2]) > 0.75:
-            plane.paint_uniform_color([0, 0, 1])
-            sphere.paint_uniform_color([0, 0, 0])
-            verticals.append(center)
-
-        else:
-            plane.paint_uniform_color([0, 1, 0])
-            sphere.paint_uniform_color([1, 0.5, 0])
-
-        colored_planes.append((plane, sphere))
-
-    stair_steps = cluster_stairs(horizontals, verticals, eps=0.07, min_samples=5)
     return colored_planes, stair_steps

@@ -31,7 +31,7 @@ def create_point_cloud(depth_frame, color_frame, intrinsics, cam_rpy, window_siz
 
     points = np.asarray(pcd.points)
     distances = points[:,2]
-    mask = (distances >= 0.5) & (distances <= 2.0)
+    mask = (distances >= 0.5) & (distances <= 3.5)
     indices = np.where(mask)[0]
     pcd = pcd.select_by_index(indices)
 
@@ -59,7 +59,7 @@ def create_point_cloud(depth_frame, color_frame, intrinsics, cam_rpy, window_siz
 
     voxel_size = 0.05
     pcd_ = pcd.voxel_down_sample(voxel_size=voxel_size)
-    # pcd_, ind = pcd_.remove_statistical_outlier(nb_neighbors=50, std_ratio=1.0) # std_ratio=2.0
+    pcd_, ind = pcd_.remove_statistical_outlier(nb_neighbors=50, std_ratio=1.0) # std_ratio=2.0
 
     # pcd = rotate_coordinates(pcd, cam_rpy)
 
