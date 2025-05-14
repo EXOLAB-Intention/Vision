@@ -1,7 +1,7 @@
-# plane_detection_histogram_ransac.py
-
 import open3d as o3d
 import numpy as np
+
+from scipy.signal import savgol_filter, find_peaks
 from imu_calibrate import rotate_points, rotate_vector
 
 def segment_planes(pcd_or_pts, cam_rpy,
@@ -9,9 +9,9 @@ def segment_planes(pcd_or_pts, cam_rpy,
                                     height_tol=0.03,
                                     depth_tol=0.03,
                                     min_slice_pts=100,
-                                    ransac_dist=0.02,
+                                    ransac_dist=0.015,
                                     ransac_n=3,
-                                    ransac_iter=50):
+                                    ransac_iter=30):
     """
     히스토그램 슬라이싱 후 RANSAC으로 평면 모델을 뽑아내는 함수.
     • 입력
@@ -49,8 +49,14 @@ def segment_planes(pcd_or_pts, cam_rpy,
                        heights.max() + bin_width,
                        bin_width)
     )
-    centers = (edges[:-1] + edges[1:]) / 2   # counts와 길이 일치
-    peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
+    centers = (edges[:-1] + edges[1:]) / 2
+
+    # Smoothing the histogram counts
+        # peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
+    smoothed_counts = savgol_filter(counts,
+                                window_length=7,
+                                polyorder=2)
+    peak_mask, _    = find_peaks(smoothed_counts)
     peaks_y   = centers[1:-1][peak_mask]
 
     for h0 in peaks_y:
@@ -98,7 +104,10 @@ def segment_planes(pcd_or_pts, cam_rpy,
                        bin_width)
     )
     centers = (edges[:-1] + edges[1:]) / 2
-    peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
+    smoothed_counts = savgol_filter(counts,
+                                window_length=7,
+                                polyorder=2)
+    peak_mask, _    = find_peaks(smoothed_counts)
     peaks_z   = centers[1:-1][peak_mask]
 
     for z0 in peaks_z:
