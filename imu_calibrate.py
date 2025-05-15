@@ -1,161 +1,125 @@
 import math
 import pyrealsense2 as rs
 import numpy as np
-import open3d as o3d
 
-global first, totalgyroangleX, totalgyroangleY, totalgyroangleZ, last_ts_gyro, angleX, angleY, angleZ, accel_x, accel_y, accel_z
+# — 전역 상태 초기값 —
 first = True
-totalgyroangleX = 0
-totalgyroangleY = 0
-totalgyroangleZ = 0
-last_ts_gyro = 0
-angleX = 0
-angleY = 180
-angleZ = -90
+totalgyroangleX = 0.0
+totalgyroangleY = 0.0
+totalgyroangleZ = 0.0
+last_ts_gyro = 0.0
+accel_angle_x = 0.0
+accel_angle_y = 0.0
+angleZ = -90.0
 
-def calibrate(f):
-    accel_frame = f.first_or_default(rs.stream.accel)
+def calibrate(frames):
+    """초기 가속도계를 이용한 카메라 Roll/Pitch 보정."""
+    accel_frame = frames.first_or_default(rs.stream.accel)
     accel = accel_frame.as_motion_frame().get_motion_data()
+    ts = frames.get_timestamp()
+    # 가속도계 기반 각도 계산 (deg)
+    ax = math.degrees(math.atan2(-accel.x, math.hypot(accel.y, accel.z)))
+    ay = math.degrees(math.atan2(-accel.z, math.hypot(accel.x, accel.y)))
+    az = 0.0
+    return ax, ay, az, ts
 
-    ts = f.get_timestamp()
-    last_ts_gyro = ts
-
-    # accelerometer calculation
-    accel_angle_x = math.degrees(math.atan2(-accel.x, math.sqrt(accel.y**2 + accel.z**2)))
-    accel_angle_y = math.degrees(math.atan2(-accel.z, math.sqrt(accel.x**2 + accel.y**2)))
-    accel_angle_z = 0
-
-    return accel_angle_x, accel_angle_y, accel_angle_z, last_ts_gyro
-
-def calculate_rotation(f, combinedangleX_prev, combinedangleY_prev, combinedangleZ_prev, totalgyroangleX, totalgyroangleY, totalgyroangleZ, last_ts_gyro):
-
-    
-    gyro_frame = f.first_or_default(rs.stream.gyro)
-    accel_frame = f.first_or_default(rs.stream.accel)
-
+def calculate_rotation(frames,
+                       prev_ax, prev_ay, prev_az,
+                       totalX, totalY, totalZ,
+                       last_ts):
+    """자이로+가속도기 보정된 Complementary filter."""
+    gyro_frame = frames.first_or_default(rs.stream.gyro)
+    accel_frame = frames.first_or_default(rs.stream.accel)
+    gyro  = gyro_frame.as_motion_frame().get_motion_data()
     accel = accel_frame.as_motion_frame().get_motion_data()
-    gyro = gyro_frame.as_motion_frame().get_motion_data()
+    ts    = frames.get_timestamp()
 
-    ts = f.get_timestamp()
+    dt = (ts - last_ts) / 1000.0
+    last_ts = ts
 
-    dt_gyro = (ts - last_ts_gyro) / 1000
-    last_ts_gyro = ts
+    # 자이로 적분 (rad → deg)
+    dX = gyro.z * dt * 57.2958
+    dY = -gyro.x * dt * 57.2958
+    dZ = -gyro.y * dt * 57.2958
 
-    gyro_angle_x = gyro.z * dt_gyro
-    gyro_angle_y = -gyro.x * dt_gyro
-    gyro_angle_z = -gyro.y * dt_gyro
+    totalX = prev_ax + dX
+    totalY = prev_ay + dY
+    totalZ = prev_az + dZ
 
-    dangleX = gyro_angle_x * 57.295791433
-    dangleY = gyro_angle_y * 57.295791433
-    dangleZ = gyro_angle_z * 57.295791433
+    # 가속도계 각도
+    ax = math.degrees(math.atan2(-accel.x, math.hypot(accel.y, accel.z)))
+    ay = math.degrees(math.atan2(-accel.z, math.hypot(accel.x, accel.y)))
+    az = 0.0
 
-    totalgyroangleX = combinedangleX_prev + dangleX
-    totalgyroangleY = combinedangleY_prev + dangleY
-    totalgyroangleZ = combinedangleZ_prev + dangleZ
+    # Complementary filter 계수
+    accel_norm = np.linalg.norm([accel.x, accel.y, accel.z])
+    alpha = np.tanh(abs(accel_norm - 10.0)) / 1.2
 
-    accel_angle_x = math.degrees(math.atan2(-accel.x, math.sqrt(accel.y**2 + accel.z**2)))
-    accel_angle_y = math.degrees(math.atan2(-accel.z, math.sqrt(accel.x**2 + accel.y**2)))
-    accel_angle_z = 0
-    # print(accel.x,", ", accel.y,", ", accel.z,", ")
-    # print(accel_angle_x,", ", accel_angle_y,", ",accel_angle_z,", ")
+    combinedX = totalX * alpha + ax * (1 - alpha)
+    combinedY = totalY * alpha + ay * (1 - alpha)
+    combinedZ = totalZ
 
-    # alpha = 0.05
-    # low alpha while stationary, high alpha while moving
-    accel_norm = np.linalg.norm(np.array([accel.x, accel.y, accel.z]))
-    alpha = np.tanh(abs(accel_norm - 10))/1.2  # 가속도 값이 10에 가까울수록 alpha는 작아짐
-
-    combinedangleX = totalgyroangleX * alpha + accel_angle_x * (1-alpha)
-    combinedangleY = totalgyroangleY * alpha + accel_angle_y * (1-alpha)
-    combinedangleZ = totalgyroangleZ
-
-    combinedangleX_prev = combinedangleX
-    combinedangleY_prev = combinedangleY
-    combinedangleZ_prev = combinedangleZ
-
-
-    return combinedangleX,combinedangleY,combinedangleZ, totalgyroangleX, totalgyroangleY, totalgyroangleZ, combinedangleX_prev, combinedangleY_prev, combinedangleZ_prev, last_ts_gyro
-
-
-def rotate_coordinates(pcd, cam_rpy):
-    points = np.asarray(pcd.points)
-
-    cam2world_R = np.array([[0, -1,  0],
-                            [0,  0, 1],
-                            [-1, 0,  0]])
- 
-    rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
-
-    Rx = np.array([
-        [1, 0, 0],
-        [0, np.cos(rx_rad), -np.sin(rx_rad)],
-        [0, np.sin(rx_rad), np.cos(rx_rad)]
-    ])
-
-    Ry = np.array([
-        [np.cos(ry_rad), 0, np.sin(ry_rad)],
-        [0, 1, 0],
-        [-np.sin(ry_rad), 0, np.cos(ry_rad)]
-    ])
-
-    Rz = np.array([
-        [np.cos(rz_rad), -np.sin(rz_rad), 0],
-        [np.sin(rz_rad), np.cos(rz_rad), 0],
-        [0, 0, 1]
-    ])
-
-    R = Rz @ Ry @ Rx
-
-    rotated_point = np.dot(points, R)
-
-    # rotated_pcd = o3d.geometry.PointCloud()
-    # rotated_pcd.points = o3d.utility.Vector3dVector(rotated_point)
-    pcd.points = o3d.utility.Vector3dVector(rotated_point)
-    
-
-
-def rotate_vector(vec, cam_rpy):
-    cam2world_R = np.array([[0, -1,  0],
-                            [0,  0, 1],
-                            [-1, 0,  0]])
- 
-    rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
-
-    Rx = np.array([
-        [1, 0, 0],
-        [0, np.cos(rx_rad), -np.sin(rx_rad)],
-        [0, np.sin(rx_rad), np.cos(rx_rad)]
-    ])
-
-    Ry = np.array([
-        [np.cos(ry_rad), 0, np.sin(ry_rad)],
-        [0, 1, 0],
-        [-np.sin(ry_rad), 0, np.cos(ry_rad)]
-    ])
-
-    Rz = np.array([
-        [np.cos(rz_rad), -np.sin(rz_rad), 0],
-        [np.sin(rz_rad), np.cos(rz_rad), 0],
-        [0, 0, 1]
-    ])
-    R = Rz @ Ry @ Rx
-
-    # rotated_vec = R @ vec
-    rotated_vec = np.dot(vec, R.T)
-
-    return rotated_vec
+    return (combinedX, combinedY, combinedZ,
+            totalX, totalY, totalZ,
+            combinedX, combinedY, combinedZ,
+            last_ts)
 
 def get_camera_angle(frames):
-    global first, accel_angle_x, accel_angle_y, angleZ, last_ts_gyro, totalgyroangleX, totalgyroangleY, totalgyroangleZ
+    """외부에서 호출할 카메라 RPY(roll, pitch, yaw)."""
+    global first, accel_angle_x, accel_angle_y, angleZ
+    global totalgyroangleX, totalgyroangleY, totalgyroangleZ, last_ts_gyro
 
     if first:
-        accel_angle_x, accel_angle_y, angleZ, last_ts_gyro = calibrate(frames)
+        ax, ay, az, last_ts_gyro = calibrate(frames)
+        accel_angle_x, accel_angle_y, angleZ = ax, ay, az
         first = False
 
-    angleX, angleY, angleZ, totalgyroangleX, totalgyroangleY, totalgyroangleZ, accel_angle_x, accel_angle_y, accel_angle_z, last_ts_gyro = calculate_rotation(
-        frames, accel_angle_x, accel_angle_y, angleZ, totalgyroangleX, totalgyroangleY, totalgyroangleZ, last_ts_gyro
+    (angleX, angleY, angleZ,
+     totalgyroangleX, totalgyroangleY, totalgyroangleZ,
+     accel_angle_x, accel_angle_y, accel_angle_z,
+     last_ts_gyro) = calculate_rotation(
+        frames,
+        accel_angle_x, accel_angle_y, angleZ,
+        totalgyroangleX, totalgyroangleY, totalgyroangleZ,
+        last_ts_gyro
     )
-    # print(angleX,", ", angleY,", ",angleZ,", ")
 
-    rotation_angle = angleX, angleY, 0
+    # Yaw는 0 고정
+    return (angleX, angleY, 0.0)
 
-    return rotation_angle
+# — 회전 행렬 및 벡터화된 회전 함수 추가 —
+def get_rotation_matrix(cam_rpy):
+    """
+    cam_rpy: (roll, pitch, yaw) in degrees
+    리얼센스 좌표계→월드 좌표계 회전 행렬.
+    """
+    # 카메라→월드 기준 축 변환
+    cam2world_R = np.array([[ 0, -1,  0],
+                            [ 0,  0,  1],
+                            [-1,  0,  0]])
+    # rpy 순서: Rx(roll) → Ry(pitch) → Rz(yaw)
+    rx, ry, rz = np.radians(cam2world_R.dot(cam_rpy))
+
+    Rx = np.array([[1,           0,            0],
+                   [0, np.cos(rx), -np.sin(rx)],
+                   [0, np.sin(rx),  np.cos(rx)]])
+    Ry = np.array([[ np.cos(ry), 0, np.sin(ry)],
+                   [           0, 1,          0],
+                   [-np.sin(ry), 0, np.cos(ry)]])
+    Rz = np.array([[np.cos(rz), -np.sin(rz), 0],
+                   [np.sin(rz),  np.cos(rz), 0],
+                   [          0,            0, 1]])
+    return Rz.dot(Ry).dot(Rx)
+
+def rotate_vector(vec, cam_rpy):
+    """(3,) 벡터 → 회전."""
+    R = get_rotation_matrix(cam_rpy)
+    return vec.dot(R.T)
+
+def rotate_points(points, cam_rpy):
+    """
+    (N,3) 포인트 배열 → 한번에 회전.
+    for문 없이 대량처리에 최적화.
+    """
+    R = get_rotation_matrix(cam_rpy)
+    return points.dot(R.T)

@@ -3,6 +3,7 @@
 import open3d as o3d
 import numpy as np
 from imu_calibrate import rotate_points, rotate_vector
+from scipy.signal import savgol_filter, find_peaks
 
 def segment_planes(pcd_or_pts, cam_rpy,
                                     # bin_width=0.02,
@@ -57,8 +58,18 @@ def segment_planes(pcd_or_pts, cam_rpy,
                        bin_width)
     )
     centers = (edges[:-1] + edges[1:]) / 2   # counts와 길이 일치
-    peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
-    peaks_y   = centers[1:-1][peak_mask]
+    # peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
+
+    window_length = 7
+    if len(counts) >= window_length:
+        smoothed_counts = savgol_filter(counts,
+                                    window_length,
+                                    polyorder=2)
+        peak_mask, _    = find_peaks(smoothed_counts)
+        peaks_y   = centers[peak_mask]
+    else:
+        peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
+        peaks_y   = centers[1:-1][peak_mask]
 
     for h0 in peaks_y:
         idx_slice = np.where(np.abs(heights - h0) < height_tol)[0]
@@ -105,8 +116,16 @@ def segment_planes(pcd_or_pts, cam_rpy,
                        bin_width)
     )
     centers = (edges[:-1] + edges[1:]) / 2
-    peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
-    peaks_z   = centers[1:-1][peak_mask]
+    # peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
+    if len(counts) >= window_length:
+        smoothed_counts = savgol_filter(counts,
+                                    window_length,
+                                    polyorder=2)
+        peak_mask, _    = find_peaks(smoothed_counts)
+        peaks_z   = centers[peak_mask]
+    else:
+        peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
+        peaks_z   = centers[1:-1][peak_mask]
 
     for z0 in peaks_z:
         idx_slice = np.where(np.abs(depths - z0) < depth_tol)[0]

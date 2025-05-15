@@ -11,10 +11,10 @@ from ultralytics import YOLO
 from collections import deque
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from scipy.signal import savgol_filter
-from imu_calibrate import get_camera_angle, rotate_coordinates
+from imu_calibrate import get_camera_angle
 from camera_calibration import get_aligned_frames, get_camera_intrinsics, create_point_cloud
-from plane_detection import segment_planes_ransac, classify_planes
-
+from plane_detection import classify_planes
+from plane_detection_histogram_ransac import segment_planes
 """
 ****************information****************
 Yolo : N
@@ -150,7 +150,7 @@ def main():
 
         # Using Ransac
         points = np.asarray(pcd.points)  # PointCloud 객체 → NumPy 배열
-        planes = segment_planes_ransac(points, camera_rpy)
+        planes = segment_planes(points, camera_rpy) if points.shape[0] != 0 else []
 
         # Getting stairs step information from the distance btw horizontal and vertical plane
         colored_planes, stair_steps = classify_planes(planes, camera_rpy)
