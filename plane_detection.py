@@ -203,6 +203,9 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
     merged_planes = []
 
     used = [False] * len(planes)
+    print("-----------------")
+    print(f"plane N : {len(planes)}")
+
 
     for i in range(len(planes)):
         if used[i]:
@@ -220,8 +223,10 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
             normal_j /= np.linalg.norm(normal_j)
             d_j = planes[j][0][3]
 
-            angle = np.rad2deg(np.arccos(np.clip(np.dot(normal_i, normal_j), -1.0, 1.0)))
-            if angle < angle_threshold and abs(d_i - d_j) < d_threshold:
+            angle = abs(np.dot(normal_i, normal_j)) 
+            if angle > 0.9 and abs(d_i - d_j) < d_threshold:
+            # angle = np.rad2deg(np.arccos(np.clip(abs(np.dot(normal_i, normal_j)), -1.0, 1.0)))
+            # if angle < angle_threshold and abs(d_i - d_j) < d_threshold:
                 merged.append(planes[j][1])
                 used[j] = True
 
@@ -236,6 +241,7 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
             merged_pcd.normals = planes[i][1].normals
 
         merged_planes.append((planes[i][0], merged_pcd))
+    print(f"plane N : {len(merged_planes)}")
 
     for plane_model, plane in merged_planes:
         
@@ -252,13 +258,13 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
 
 
         # horizontal : red
-        if abs(normal[1]) > 0.9 and abs(normal[2]) < 0.1:
+        if abs(normal[1]) > 0.95 :
             plane.paint_uniform_color([1, 0, 0])
             sphere.paint_uniform_color([0, 0, 0])
             horizontals.append(center)
 
         # vertical : blue
-        elif abs(normal[1]) < 0.1 and abs(normal[2]) > 0.9:
+        elif abs(normal[2]) > 0.95:
             plane.paint_uniform_color([0, 0, 1])
             sphere.paint_uniform_color([0, 0, 0])
             verticals.append(center)
@@ -286,6 +292,18 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
         depth = abs(center2[2] - center1[2])
         if depth > 0.01:
             depths.append(depth)
+
+    # heights = []
+    # depths = []
+    # horizontals_sorted = sorted(horizontals, key=lambda x: x[1])
+    # for i in range(len(horizontals_sorted) - 1):
+    #     center1 = horizontals_sorted[i]
+    #     center2 = horizontals_sorted[i + 1]
+    #     height = abs(center2[1] - center1[1])
+    #     depth = abs(center2[2] - center1[2])
+    #     if height > 0.01 and depth > 0.01:
+    #         heights.append(height)
+    #         depths.append(depth)
 
     num_steps = min(len(heights), len(depths))
     for i in range(num_steps):
