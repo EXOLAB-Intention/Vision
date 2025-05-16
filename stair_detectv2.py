@@ -159,7 +159,7 @@ def main():
         # Using Ransac
         points = np.asarray(pcd.points)  # PointCloud 객체 → NumPy 배열
         if points.shape[0] != 0:
-            planes, horizon_counts, vertical_counts = segment_planes(points, camera_rpy)
+            planes, vertical_counts, horizon_counts, peak_mask = segment_planes(points, camera_rpy)
         else:
             planes = []
 
@@ -243,6 +243,7 @@ def main():
             ax2.clear()
             x = np.arange(len(horizon_counts[0]))
             ax2.plot(x, horizon_counts[0], x, horizon_counts[1])
+            ax2.scatter(x[peak_mask[1]], horizon_counts[1][peak_mask[1]], color='red', s=50, label="peaks")
             ax2.set_title("Horizon Histogram"); ax2.set_ylabel("Count")
             ax2.set_ylim(0, np.max(horizon_counts[0])); ax2.set_xlim(0, 140); ax2.grid(True)
             ax2.legend("histogram counts", "filtered counts")
@@ -253,6 +254,7 @@ def main():
             ax3.clear()
             x_ = np.arange(len(vertical_counts[0]))
             ax3.plot(x_, vertical_counts[0], x_, vertical_counts[1])
+            ax3.scatter(x_[peak_mask[0]], vertical_counts[1][peak_mask[0]], color='red', s=50, label="peaks")
             ax3.set_title("Vertical Histogram"); ax3.set_ylabel("Count")
             ax3.set_ylim(0, np.max(vertical_counts[0])); ax3.set_xlim(0, 140); ax3.grid(True)
             ax3.legend("histogram counts", "filtered counts")

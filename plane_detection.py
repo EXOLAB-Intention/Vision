@@ -285,13 +285,19 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
             heights.append(height)
 
     depths = []
-    verticals_sorted = sorted(verticals, key=lambda x: x[2])
+    verticals_sorted = sorted(verticals, key=lambda x: -x[2])
     for i in range(len(verticals_sorted) - 1):
         center1 = verticals_sorted[i]
         center2 = verticals_sorted[i + 1]
         depth = abs(center2[2] - center1[2])
         if depth > 0.01:
             depths.append(depth)
+
+    if len(verticals_sorted) !=0:
+        distance_to_stairs = (True, verticals_sorted[-1])
+    else:
+        distance_to_stairs = (False, 0)
+
 
     # heights = []
     # depths = []

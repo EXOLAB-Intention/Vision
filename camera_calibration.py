@@ -4,8 +4,8 @@ import numpy as np
 """
 ****************hyper parameter**************** 
 voxel_size : voxel 사이즈 설정[cm]
-             너무 작은 voxel size → 노이즈 유지됨.
-             너무 큰 voxel size → 디테일 손실됨.
+             너무 작은 voxel size -> 노이즈 유지됨.
+             너무 큰 voxel size -> 디테일 손실됨.
 nb_neighbors : 	각 포인트에 대해 고려할 이웃의 수
                 예: 20이면 각 포인트 주변의 20개 포인트 기준으로 거리 계산
 std_ratio : outlier 판단 기준이 되는 표준편차 배수

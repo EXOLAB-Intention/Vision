@@ -56,16 +56,18 @@ def segment_planes(pcd_or_pts, cam_rpy,
     centers = (edges[:-1] + edges[1:]) / 2   # counts와 길이 일치
 
     window_length = 7
+    polyorder = 2
     if len(counts_horizon) >= window_length:
         smoothed_counts_horizon = savgol_filter(counts_horizon,
                                     window_length,
-                                    polyorder=2)
-        peak_mask, _    = find_peaks(smoothed_counts_horizon)
-        peaks_y   = centers[peak_mask]
+                                    polyorder=polyorder)
+        peak_mask_horizon, _    = find_peaks(smoothed_counts_horizon)
+        peaks_y   = centers[peak_mask_horizon]
     else:
-        peak_mask = (counts_horizon[1:-1] > counts_horizon[:-2]) & (counts_horizon[1:-1] > counts_horizon[2:])
-        peaks_y   = centers[1:-1][peak_mask]
+        peak_mask_horizon = (counts_horizon[1:-1] > counts_horizon[:-2]) & (counts_horizon[1:-1] > counts_horizon[2:])
+        peaks_y   = centers[1:-1][peak_mask_horizon]
         smoothed_counts_horizon = counts_horizon
+        peak_mask_horizon = [np.where(peak_mask_horizon)[0]+1]
 
     for h0 in peaks_y:
         idx_slice = np.where(np.abs(heights - h0) < height_tol)[0]
@@ -112,13 +114,14 @@ def segment_planes(pcd_or_pts, cam_rpy,
     if len(counts_vertical) >= window_length:
         smoothed_counts_verical = savgol_filter(counts_vertical,
                                     window_length,
-                                    polyorder=2)
-        peak_mask, _    = find_peaks(smoothed_counts_verical)
-        peaks_z   = centers[peak_mask]
+                                    polyorder=polyorder)
+        peak_mask_vertical, _    = find_peaks(smoothed_counts_verical)
+        peaks_z   = centers[peak_mask_vertical]
     else:
-        peak_mask = (counts_vertical[1:-1] > counts_vertical[:-2]) & (counts_vertical[1:-1] > counts_vertical[2:])
-        peaks_z   = centers[1:-1][peak_mask]
+        peak_mask_vertical = (counts_vertical[1:-1] > counts_vertical[:-2]) & (counts_vertical[1:-1] > counts_vertical[2:])
+        peaks_z   = centers[1:-1][peak_mask_vertical]
         smoothed_counts_verical = counts_vertical
+        peak_mask_vertical = [np.where(peak_mask_vertical)[0]+1]
 
     for z0 in peaks_z:
         idx_slice = np.where(np.abs(depths - z0) < depth_tol)[0]
@@ -151,4 +154,4 @@ def segment_planes(pcd_or_pts, cam_rpy,
             pts[global_inliers]
         ))
 
-    return planes, (counts_vertical, smoothed_counts_verical), (counts_horizon, smoothed_counts_horizon)
+    return planes, (counts_vertical, smoothed_counts_verical), (counts_horizon, smoothed_counts_horizon), (peak_mask_vertical, peak_mask_horizon)
