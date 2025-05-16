@@ -14,9 +14,9 @@ def segment_planes(pcd_or_pts, cam_rpy,
                                     # ransac_n=3,
                                     # ransac_iter=80):
                                     bin_width=0.02,
-                                    height_tol=0.03,
-                                    depth_tol=0.03,
-                                    min_slice_pts=200,
+                                    height_tol=0.1,
+                                    depth_tol=0.1,
+                                    min_slice_pts=100,
                                     ransac_dist=0.005,
                                     ransac_n=3,
                                     ransac_iter=80):
@@ -48,28 +48,24 @@ def segment_planes(pcd_or_pts, cam_rpy,
     world_pts = rotate_points(pts, cam_rpy)  # (N,3)
 
     planes = []
-
+    
     # --- A. 수평면 검출 (y축 히스토그램) ---
     heights = world_pts[:,1]
-    counts, edges = np.histogram(
-        heights,
-        bins=np.arange(heights.min(),
-                       heights.max() + bin_width,
-                       bin_width)
-    )
+    bins = np.arange(heights.min(), heights.max() + bin_width, bin_width)
+    counts_horizon, edges = np.histogram(heights, bins)
     centers = (edges[:-1] + edges[1:]) / 2   # counts와 길이 일치
-    # peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
 
     window_length = 7
-    if len(counts) >= window_length:
-        smoothed_counts = savgol_filter(counts,
+    if len(counts_horizon) >= window_length:
+        smoothed_counts_horizon = savgol_filter(counts_horizon,
                                     window_length,
                                     polyorder=2)
-        peak_mask, _    = find_peaks(smoothed_counts)
+        peak_mask, _    = find_peaks(smoothed_counts_horizon)
         peaks_y   = centers[peak_mask]
     else:
-        peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
+        peak_mask = (counts_horizon[1:-1] > counts_horizon[:-2]) & (counts_horizon[1:-1] > counts_horizon[2:])
         peaks_y   = centers[1:-1][peak_mask]
+        smoothed_counts_horizon = counts_horizon
 
     for h0 in peaks_y:
         idx_slice = np.where(np.abs(heights - h0) < height_tol)[0]
@@ -109,23 +105,20 @@ def segment_planes(pcd_or_pts, cam_rpy,
 
     # --- B. 수직면 검출 (z축 히스토그램) ---
     depths = world_pts[:,2]
-    counts, edges = np.histogram(
-        depths,
-        bins=np.arange(depths.min(),
-                       depths.max() + bin_width,
-                       bin_width)
-    )
+    bins=np.arange(depths.min(), depths.max() + bin_width, bin_width)
+    counts_vertical, edges = np.histogram(depths, bins)
     centers = (edges[:-1] + edges[1:]) / 2
-    # peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
-    if len(counts) >= window_length:
-        smoothed_counts = savgol_filter(counts,
+
+    if len(counts_vertical) >= window_length:
+        smoothed_counts_verical = savgol_filter(counts_vertical,
                                     window_length,
                                     polyorder=2)
-        peak_mask, _    = find_peaks(smoothed_counts)
+        peak_mask, _    = find_peaks(smoothed_counts_verical)
         peaks_z   = centers[peak_mask]
     else:
-        peak_mask = (counts[1:-1] > counts[:-2]) & (counts[1:-1] > counts[2:])
+        peak_mask = (counts_vertical[1:-1] > counts_vertical[:-2]) & (counts_vertical[1:-1] > counts_vertical[2:])
         peaks_z   = centers[1:-1][peak_mask]
+        smoothed_counts_verical = counts_vertical
 
     for z0 in peaks_z:
         idx_slice = np.where(np.abs(depths - z0) < depth_tol)[0]
@@ -158,4 +151,4 @@ def segment_planes(pcd_or_pts, cam_rpy,
             pts[global_inliers]
         ))
 
-    return planes
+    return planes, (counts_vertical, smoothed_counts_verical), (counts_horizon, smoothed_counts_horizon)

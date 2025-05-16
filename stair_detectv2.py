@@ -15,6 +15,7 @@ from imu_calibrate import get_camera_angle
 from camera_calibration import get_aligned_frames, get_camera_intrinsics, create_point_cloud
 from plane_detection import classify_planes
 from plane_detection_histogram_ransac import segment_planes
+
 """
 ****************information****************
 Yolo : N
@@ -87,7 +88,6 @@ def rpy_to_rotmat(cam_rpy):
     ])
     return Rz @ Ry @ Rx
 
-
 def main():
 
     # *****************Realsense Setting***********************
@@ -117,6 +117,7 @@ def main():
     view_ctl = vis.get_view_control()
     added_geometry = False
 
+    # Staircas step height, depth
     fig, ax = plt.subplots(figsize=(16, 4))
     canvas = FigureCanvas(fig)
     x_data = deque(maxlen=30)
@@ -125,7 +126,14 @@ def main():
     line1, = ax.plot([], [], label='Avg Height')
     line2, = ax.plot([], [], label='Avg Depth')
     ax.set_ylim(0, 0.5)
+    ax.grid(True)
     ax.legend()
+
+    fig2, ax2 = plt.subplots(figsize=(9, 4))
+    canvas2 = FigureCanvas(fig2)
+
+    fig3, ax3 = plt.subplots(figsize=(9, 4))
+    canvas3 = FigureCanvas(fig3)
     # *********************************************************
 
     while True:
@@ -150,7 +158,10 @@ def main():
 
         # Using Ransac
         points = np.asarray(pcd.points)  # PointCloud 객체 → NumPy 배열
-        planes = segment_planes(points, camera_rpy) if points.shape[0] != 0 else []
+        if points.shape[0] != 0:
+            planes, horizon_counts, vertical_counts = segment_planes(points, camera_rpy)
+        else:
+            planes = []
 
         # Getting stairs step information from the distance btw horizontal and vertical plane
         colored_planes, stair_steps = classify_planes(planes, camera_rpy)
@@ -161,9 +172,6 @@ def main():
         # # Gettign stairs step infromation from the clustering
         # colored_planes, stair_steps = classify_planes_and_cluster_steps(planes, camera_rpy)
 
-        
-        
-        
         R_cam = rpy_to_rotmat(camera_rpy)
         R_global = R_cam.T  # 지면 기준 절대 방향 (카메라 회전의 역행렬)
         center = np.asarray(pcd_origin.get_center())
@@ -211,6 +219,7 @@ def main():
 
 
             # *******************Stair Step Information visualization*********************
+            # ----------------Staircas Step Height, Depth-----------------
             t = time.time()
             x_data.append(t)
             height_data.append(avg_height)
@@ -229,6 +238,31 @@ def main():
 
             graph_resized = cv2.resize(graph_image, (1280, pcd_image.shape[0]))
             combined_display = np.hstack((pcd_image, graph_resized))
+
+            # ----------------Histogram counts-----------------
+            ax2.clear()
+            x = np.arange(len(horizon_counts[0]))
+            ax2.plot(x, horizon_counts[0], x, horizon_counts[1])
+            ax2.set_title("Horizon Histogram"); ax2.set_ylabel("Count")
+            ax2.set_ylim(0, np.max(horizon_counts[0])); ax2.set_xlim(0, 140); ax2.grid(True)
+            ax2.legend("histogram counts", "filtered counts")
+            canvas2.draw()
+            buf = np.asarray(canvas2.buffer_rgba())
+            graph_horizon = cv2.cvtColor(buf, cv2.COLOR_RGBA2BGR)
+
+            ax3.clear()
+            x_ = np.arange(len(vertical_counts[0]))
+            ax3.plot(x_, vertical_counts[0], x_, vertical_counts[1])
+            ax3.set_title("Vertical Histogram"); ax3.set_ylabel("Count")
+            ax3.set_ylim(0, np.max(vertical_counts[0])); ax3.set_xlim(0, 140); ax3.grid(True)
+            ax3.legend("histogram counts", "filtered counts")
+            canvas3.draw()
+            buf_ = np.asarray(canvas3.buffer_rgba())
+            graph_vertical = cv2.cvtColor(buf_, cv2.COLOR_RGBA2BGR)
+
+            combined_display2 = np.hstack((graph_horizon, graph_vertical))
+            graph_resized = cv2.resize(combined_display2, (combined_display.shape[1], 320))
+            combined_display = np.vstack((combined_display, graph_resized))
 
             cv2.imshow("stairs detection with graph", combined_display)
             key = cv2.waitKey(1)
