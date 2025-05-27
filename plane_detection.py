@@ -20,12 +20,10 @@ ransac_n : 평면으로 인식할 이웃 point들의 수
 
 """
 
+
+
 import open3d as o3d
 import numpy as np
-
-DistanceThre = 0.06   # [m]
-AngleThre = 15        # [deg]
-
 
 def ransac_plane_fit_limited_radius(points,
                                     cam_rpy,
@@ -193,7 +191,7 @@ def segment_planes_ransac(points,
     return planes
 
 
-def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=DistanceThre, max_area=3.5):
+def classify_planes(planes, cam_ori, stop_flag, angle_threshold=15, d_threshold=0.06, max_area=3.5):
     import copy
 
     colored_planes = []
@@ -201,10 +199,13 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
     verticals = []
     stair_steps = []
     merged_planes = []
+    vertical_plane_distance = []
+    horizontal_plane_distance = []
+    distance = []
 
     used = [False] * len(planes)
-    print("-----------------")
-    print(f"plane N : {len(planes)}")
+    # print("-----------------")
+    # print(f"plane N : {len(planes)}")
 
 
     for i in range(len(planes)):
@@ -241,14 +242,16 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
             merged_pcd.normals = planes[i][1].normals
 
         merged_planes.append((planes[i][0], merged_pcd))
-    print(f"plane N : {len(merged_planes)}")
+    # print(f"plane N : {len(merged_planes)}")
 
     for plane_model, plane in merged_planes:
         
+        plane_d = np.array(plane_model[3])
         normal = np.array(plane_model[:3])
         normal = rotate_vector(normal, cam_ori)
         normal /= np.linalg.norm(normal)
-        center = np.mean(np.asarray(plane.points), axis=0)
+        # center = np.mean(np.asarray(plane.points), axis=0)
+        center = plane.get_center()
 
         sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
         sphere.translate(center)
@@ -256,18 +259,19 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
         center = rotate_vector(center, cam_ori)
 
 
-
         # horizontal : red
         if abs(normal[1]) > 0.95 :
             plane.paint_uniform_color([1, 0, 0])
             sphere.paint_uniform_color([0, 0, 0])
             horizontals.append(center)
+            horizontal_plane_distance.append(plane_d)
 
         # vertical : blue
         elif abs(normal[2]) > 0.95:
             plane.paint_uniform_color([0, 0, 1])
             sphere.paint_uniform_color([0, 0, 0])
             verticals.append(center)
+            vertical_plane_distance.append(plane_d)
 
         else:
             plane.paint_uniform_color([0, 1, 0])
@@ -276,43 +280,40 @@ def classify_planes(planes, cam_ori, angle_threshold=AngleThre, d_threshold=Dist
         colored_planes.append((plane, sphere))
 
     heights = []
+    horizon_d = []
     horizontals_sorted = sorted(horizontals, key=lambda x: x[1])
+    horizontal_plane_d_sorted = sorted(horizontal_plane_distance)
     for i in range(len(horizontals_sorted) - 1):
         center1 = horizontals_sorted[i]
         center2 = horizontals_sorted[i + 1]
+        horizon_d.append(abs(horizontal_plane_d_sorted[i] - horizontal_plane_d_sorted[i+1]))
         height = abs(center2[1] - center1[1])
         if height > 0.01:
             heights.append(height)
 
     depths = []
-    verticals_sorted = sorted(verticals, key=lambda x: -x[2])
+    vertical_d = []
+    verticals_sorted = sorted(verticals, key=lambda x: x[2])
+    vertical_plane_d_sorted = sorted(vertical_plane_distance)
     for i in range(len(verticals_sorted) - 1):
         center1 = verticals_sorted[i]
         center2 = verticals_sorted[i + 1]
+        vertical_d.append(abs(vertical_plane_d_sorted[i] - vertical_plane_d_sorted[i+1]))
         depth = abs(center2[2] - center1[2])
         if depth > 0.01:
             depths.append(depth)
 
-    if len(verticals_sorted) !=0:
+    if len(verticals_sorted) >= 1:
         distance_to_stairs = (True, verticals_sorted[-1])
     else:
         distance_to_stairs = (False, 0)
-
-
-    # heights = []
-    # depths = []
-    # horizontals_sorted = sorted(horizontals, key=lambda x: x[1])
-    # for i in range(len(horizontals_sorted) - 1):
-    #     center1 = horizontals_sorted[i]
-    #     center2 = horizontals_sorted[i + 1]
-    #     height = abs(center2[1] - center1[1])
-    #     depth = abs(center2[2] - center1[2])
-    #     if height > 0.01 and depth > 0.01:
-    #         heights.append(height)
-    #         depths.append(depth)
 
     num_steps = min(len(heights), len(depths))
     for i in range(num_steps):
         stair_steps.append((heights[i], depths[i]))
 
-    return colored_planes, stair_steps
+    num_steps = min(len(heights), len(depths))
+    for i in range(num_steps):
+        distance.append((horizon_d[i], vertical_d[i]))
+
+    return colored_planes, stair_steps, distance_to_stairs, distance

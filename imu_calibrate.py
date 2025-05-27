@@ -93,11 +93,16 @@ def get_rotation_matrix(cam_rpy):
     cam_rpy: (roll, pitch, yaw) in degrees
     리얼센스 좌표계→월드 좌표계 회전 행렬.
     """
-    # 카메라→월드 기준 축 변환
-    cam2world_R = np.array([[ 0, -1,  0],
-                            [ 0,  0,  1],
-                            [-1,  0,  0]])
-    # rpy 순서: Rx(roll) → Ry(pitch) → Rz(yaw)
+
+
+    # cam2world_R = np.array([[ 0, -1,  0],
+    #                         [ 0,  0,  1],
+    #                         [-1,  0,  0]])
+    
+    cam2world_R = np.array([[0, -1,  0],
+                            [0,  0, -1],
+                            [1,  0,  0]])
+
     rx, ry, rz = np.radians(cam2world_R.dot(cam_rpy))
 
     Rx = np.array([[1,           0,            0],
@@ -109,7 +114,7 @@ def get_rotation_matrix(cam_rpy):
     Rz = np.array([[np.cos(rz), -np.sin(rz), 0],
                    [np.sin(rz),  np.cos(rz), 0],
                    [          0,            0, 1]])
-    return Rz.dot(Ry).dot(Rx)
+    return Rz @ Ry @ Rx
 
 def rotate_vector(vec, cam_rpy):
     """(3,) 벡터 → 회전."""

@@ -65,9 +65,13 @@ def GetData():
 
 def rpy_to_rotmat(cam_rpy):
 
+    # cam2world_R = np.array([[0, -1,  0],
+    #                         [0,  0, -1],
+    #                         [-1,  0,  0]])
+
     cam2world_R = np.array([[0, -1,  0],
-                            [0,  0, 1],
-                            [-1, 0,  0]])
+                            [0,  0, -1],
+                            [1,  0,  0]])
     
     rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
 
@@ -86,7 +90,19 @@ def rpy_to_rotmat(cam_rpy):
         [np.sin(rz_rad), np.cos(rz_rad), 0],
         [0, 0, 1]
     ])
+
     return Rz @ Ry @ Rx
+
+def is_converged(step_info_buffer, std_threshold=0.01):
+    arr = np.array(step_info_buffer)
+    std = np.std(arr, axis=0)
+    
+    return np.all(std < std_threshold)
+
+def average_step_info(step_info_buffer):
+    arr = np.array(step_info_buffer)
+    return np.mean(arr, axis=0)
+
 
 def main():
 
@@ -135,11 +151,19 @@ def main():
     fig3, ax3 = plt.subplots(figsize=(9, 4))
     canvas3 = FigureCanvas(fig3)
     # *********************************************************
+    
+    step_info_buffer = []
+    final_step_info = None
+    MAX_BUFFER = 50
+    stop_flag = False
+    staircase_faeature = None
 
     while True:
 
         avg_height = 0.0
         avg_depth = 0.0
+        avg_height_ = 0.0
+        avg_depth_ = 0.0
 
         # *******************Depth / RGB image aligning************
         depth_frame, color_frame, aligned_frames = get_aligned_frames(pipeline, align)
@@ -156,37 +180,58 @@ def main():
         pcd_origin, pcd, color_image, depth_image = create_point_cloud(depth_frame, color_frame, pinhole_camera_intrinsic, camera_rpy)
         gray_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2GRAY)
 
+
+        if final_step_info is None:
+            stop_flag = True
+            
         # Using Ransac
         points = np.asarray(pcd.points)  # PointCloud 객체 → NumPy 배열
         if points.shape[0] != 0:
-            planes, vertical_counts, horizon_counts, peak_mask = segment_planes(points, camera_rpy)
+            planes, vertical_counts, horizon_counts, peak_mask = segment_planes(points, camera_rpy, stop_flag)
         else:
             planes = []
 
         # Getting stairs step information from the distance btw horizontal and vertical plane
-        colored_planes, stair_steps = classify_planes(planes, camera_rpy)
-        # if len(colored_planes) > 0 and len(colored_planes[0]) > 0:
-        #     rotate_coordinates(colored_planes[0][0], camera_rpy)
+        colored_planes, stair_steps, distance_to_stairs, distance = classify_planes(planes, camera_rpy, stop_flag)
 
+        stair_steps_np = np.array(stair_steps)  # shape: (N, 2)
+        distance_np = np.array(distance)
 
-        # # Gettign stairs step infromation from the clustering
-        # colored_planes, stair_steps = classify_planes_and_cluster_steps(planes, camera_rpy)
+        if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2 and staircase_faeature is None:
+
+            n = stair_steps_np.shape[0]
+            step_num = n if n < 4 else 4
+            avg_height = np.mean(stair_steps_np[:step_num, 0])
+            avg_depth = np.mean(stair_steps_np[:step_num, 1])
+            avg_height_ = np.mean(distance_np[:step_num, 0])
+            avg_depth_ = np.mean(distance_np[:step_num, 1])
+            # print(f"Average height: {avg_height}, Average depth: {avg_depth}")
+
+            if final_step_info is None:
+                if stair_steps_np is not None:
+                    step_info_buffer.append([avg_depth, avg_height])
+                
+                if len(step_info_buffer) > MAX_BUFFER:
+                    step_info_buffer.pop(0)
+
+                if len(step_info_buffer) == MAX_BUFFER and staircase_faeature is None:
+                    if is_converged(step_info_buffer):
+                        final_step_info = average_step_info(step_info_buffer)
+                        print("Staircase Step features:", final_step_info)
+                        staircase_faeature = final_step_info
+
+                        final_step_info = None
+                        step_info_buffer.clear()
+        elif staircase_faeature is not None:
+            print("Distance to Stair : ", -distance_to_stairs[1][2])
+
 
         R_cam = rpy_to_rotmat(camera_rpy)
         R_global = R_cam.T  # 지면 기준 절대 방향 (카메라 회전의 역행렬)
         center = np.asarray(pcd_origin.get_center())
-
         axis_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)
         axis_frame.rotate(R_global, center=(0, 0, 0))  # 절대 방향 적용
         axis_frame.translate(center, relative=False)
-    
-
-        stair_steps_np = np.array(stair_steps)  # shape: (N, 2)
-        if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2:
-            avg_height = np.mean(stair_steps_np[:, 0])
-            avg_depth = np.mean(stair_steps_np[:, 1])
-            print(f"Average height: {avg_height}, Average depth: {avg_depth}")
-
 
         # *******************GUI Visualization*********************
         if not added_geometry:
