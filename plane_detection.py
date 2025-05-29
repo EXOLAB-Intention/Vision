@@ -4,6 +4,8 @@ from sklearn.cluster import DBSCAN
 from imu_calibrate import rotate_vector
 import copy
 from scipy.spatial import cKDTree
+from sklearn.cluster import KMeans
+from scipy.optimize import curve_fit
 """
 
 ****************Plane Detection**************** 
@@ -20,180 +22,35 @@ ransac_n : 평면으로 인식할 이웃 point들의 수
 
 """
 
+# ********************hyper parameter********************
+
+angle_threshold=15             # Plane Merging Procedure : threshold when you compare two nomal vector of planes with degree angle
+angle_threshold_normal = 0.9   # Plane Merging Procedure : threshold when you compare two nomal vector of planes with cosine value
+d_threshold=0.06               # Plane Merging Procedure : if distance btw two planes is smaller than d_threshold, two planes will be merged
+plane_threshold_normal = 0.95  # Dividing horizon, verical plane : if the y or z axis of normal vector is bigger than threshold, plane label will be divided into horizontal or vertical
+
+# *******************************************************
 
 
-import open3d as o3d
-import numpy as np
+def fit_stair_model(sorted_centers, axis=1):
+    coords = np.array(sorted_centers)
+    step_indices = np.arange(len(coords))
+    basis_normal_vec = coords[:, axis]
 
-def ransac_plane_fit_limited_radius(points,
-                                    cam_rpy,
-                                    threshold=0.03,
-                                    num_ransac_points=3,
-                                    num_iterations=100,
-                                    min_inliers=150,
-                                    sample_radius=0.05,
-                                    sample_points_var_ratio = 0.08):
-    best_plane = []
-    best_inliers = []
+    def stair_func(n, step_size, offset):
+        return step_size * n + offset
 
-    num_points = points.shape[0]
-    kdtree = cKDTree(points)
+    popt, _ = curve_fit(stair_func, step_indices, basis_normal_vec)
+    step_size, offset = popt
 
-    for _ in range(num_iterations):
+    predicted = stair_func(step_indices, *popt)
 
-        sample_cam_coord = [0,0,0]
+    residuals = basis_normal_vec - predicted
+    rmse = np.sqrt(np.mean(residuals**2))
 
-        center_idx = np.random.randint(num_points)
-        center = points[center_idx]
+    return step_size, offset, predicted, rmse
 
-        # -----------points sampling in circle------------
-        # candidate_indices = kdtree.query_ball_point(center, r=sample_radius)
-        # 시간복잡도 ≈ O(log N + M)
-        # N: KDTree에 저장된 포인트 수
-        # M: 반경 r 안에 존재하는 이웃의 수
-
-        # # -----------points sampling in limited number of points------------
-        _, candidate_indices = kdtree.query(center, k=50)
-        # 시간복잡도 ≈ O(log N + M)
-        # N: KDTree에 저장된 포인트 수
-        # M: 찾을 최근접 이웃 수
-
-        if len(candidate_indices) < num_ransac_points:
-            continue
-
-        sample_indices = np.random.choice(candidate_indices, num_ransac_points, replace=False)
-        sample = points[sample_indices]
-
-        sample_cam_coord[0] = rotate_vector(sample[0], cam_rpy)
-        sample_cam_coord[1] = rotate_vector(sample[1], cam_rpy)
-        sample_cam_coord[2] = rotate_vector(sample[2], cam_rpy)
-
-        # -----------compare sampling points with variance of each axis------------
-        var = np.var(sample_cam_coord, axis=0)
-        ratio = np.min(var) / np.sum(var)
-
-        # # -----------compare sampling points with eigen value of covariance matrix------------
-        # mean = np.mean(sample_cam_coord, axis=0)
-        # sample_centered = sample_cam_coord - mean
-        # cov_matrix = np.cov(sample_centered.T, bias=True)
-        # eigvals, eigvecs = np.linalg.eigh(cov_matrix)
-        # eigvals = np.sort(eigvals)
-        # ratio = eigvals[0] / (eigvals[0] + eigvals[1] + eigvals[2])
-        # print(ratio)
-        
-        if abs(ratio) > sample_points_var_ratio:
-            continue
-        # print(ratio)
-
-        v1, v2 = sample[1] - sample[0], sample[2] - sample[0]
-        normal = np.cross(v1, v2)
-        norm_val = np.linalg.norm(normal)
-        if norm_val == 0:
-            continue
-        normal /= norm_val
-        normal_rot = rotate_vector(normal, cam_rpy)
-
-        # a, b, c = normal
-        # d = -np.dot(normal, sample[0])
-
-        # distances = np.abs((points @ normal) + d) / np.linalg.norm(normal)
-        # inlier_indices = np.where(distances < threshold)[0]
-
-        # # plane_point_center = np.mean(np.asarray(points)[inlier_indices], axis=0)
-        # # _, plane_point_indices = kdtree.query(plane_point_center, k=4)
-
-        # # neighbor_points = np.asarray(points)[plane_point_indices]
-        # # distances = np.linalg.norm(neighbor_points - plane_point_center, axis=1)
-        # # mean_distance = np.mean(distances)
-
-        # # if mean_distance > 0.05:
-        # #     continue
-
-        # if len(inlier_indices) > len(best_inliers):
-        #     best_inliers = inlier_indices
-        #     best_plane = (a, b, c, d)   
-
-        normal_dot_product_horizon  = abs(np.dot([0,1,0], normal_rot))
-        normal_dot_product_vertical = abs(np.dot([0,0,1], normal_rot))
-
-        if normal_dot_product_horizon > 0.9 or normal_dot_product_vertical > 0.9:
-            a, b, c = normal
-            d = -np.dot(normal, sample[0])
-
-            distances = np.abs((points @ normal) + d) / np.linalg.norm(normal)
-            inlier_indices = np.where(distances < threshold)[0]
-            
-            kdtree2 = cKDTree(points[inlier_indices])
-
-            plane_point_center = np.mean(np.asarray(points)[inlier_indices], axis=0)
-            _, plane_point_indices = kdtree2.query(plane_point_center, k=4)
-
-            neighbor_points = np.asarray(points)[plane_point_indices]
-            distances = np.linalg.norm(neighbor_points - plane_point_center, axis=1)
-            mean_distance = np.mean(distances)
-            print(mean_distance)
-
-            if mean_distance > 3.0:
-                continue
-
-            if len(inlier_indices) > len(best_inliers):
-                best_inliers = inlier_indices
-                best_plane = (a, b, c, d)   
-        else:
-            continue
-
-        
-
-    inlier_points = points[best_inliers]
-    return best_plane, inlier_points, best_inliers
-
-def segment_planes_ransac(points,
-                          cam_rpy,
-                          distance_threshold=0.02,
-                          num_iterations=50,
-                          min_ratio=0.01,
-                          min_num_points=150,
-                          max_planes=12,
-                          sampling_radius = 0.05,
-                          sample_points_var_ratio = 0.05):
-
-    # points = rotate_vector(points, cam_rpy)
-    planes = []
-    rest_points = points.copy()
-    total_points = points.shape[0]
-
-    while len(rest_points) > min_num_points and len(planes) < max_planes:
-
-        result = ransac_plane_fit_limited_radius(rest_points,
-                                                 cam_rpy,
-                                                 threshold=distance_threshold,
-                                                 num_iterations=num_iterations,
-                                                 min_inliers=min(min_ratio * total_points, min_num_points),
-                                                 sample_radius = sampling_radius,
-                                                 sample_points_var_ratio = sample_points_var_ratio)
-
-        if result is None:
-            break
-
-        plane_model, inlier_points, inlier_indices = result
-
-        
-        if len(inlier_points) < total_points * min_ratio:
-            break
-
-        planes.append((plane_model, inlier_points))
-
-        # mask = np.ones(len(rest_points), dtype=bool)
-        # mask[inlier_indices] = False
-        # rest_points = rest_points[mask]
-        rest_points = np.delete(rest_points, inlier_indices, axis=0)
-
-    return planes
-
-
-def classify_planes(planes, cam_ori, stop_flag, angle_threshold=15, d_threshold=0.06, max_area=3.5):
-    import copy
-
+def classify_planes(planes, cam_ori, stop_flag, angle_threshold=angle_threshold, d_threshold=d_threshold, max_area=3.5):
     colored_planes = []
     horizontals = []
     verticals = []
@@ -225,7 +82,7 @@ def classify_planes(planes, cam_ori, stop_flag, angle_threshold=15, d_threshold=
             d_j = planes[j][0][3]
 
             angle = abs(np.dot(normal_i, normal_j)) 
-            if angle > 0.9 and abs(d_i - d_j) < d_threshold:
+            if angle > angle_threshold_normal and abs(d_i - d_j) < d_threshold:
             # angle = np.rad2deg(np.arccos(np.clip(abs(np.dot(normal_i, normal_j)), -1.0, 1.0)))
             # if angle < angle_threshold and abs(d_i - d_j) < d_threshold:
                 merged.append(planes[j][1])
@@ -260,14 +117,14 @@ def classify_planes(planes, cam_ori, stop_flag, angle_threshold=15, d_threshold=
 
 
         # horizontal : red
-        if abs(normal[1]) > 0.95 :
+        if abs(normal[1]) >  plane_threshold_normal:
             plane.paint_uniform_color([1, 0, 0])
             sphere.paint_uniform_color([0, 0, 0])
             horizontals.append(center)
             horizontal_plane_distance.append(plane_d)
 
         # vertical : blue
-        elif abs(normal[2]) > 0.95:
+        elif abs(normal[2]) > plane_threshold_normal:
             plane.paint_uniform_color([0, 0, 1])
             sphere.paint_uniform_color([0, 0, 0])
             verticals.append(center)
@@ -302,6 +159,22 @@ def classify_planes(planes, cam_ori, stop_flag, angle_threshold=15, d_threshold=
         depth = abs(center2[2] - center1[2])
         if depth > 0.01:
             depths.append(depth)
+
+
+
+
+
+    if len(horizontals_sorted) != 0:
+        height_step, height_offset, pred_heights, height_rmse = fit_stair_model(horizontals_sorted, axis=1)
+        print(f"Step height: {height_step:.3f}, RMSE: {height_rmse:.3f}")
+
+    if len(verticals_sorted) != 0:
+        depth_step, depth_offset, pred_depths, depth_rmse = fit_stair_model(verticals_sorted, axis=2)
+        print(f"Step depth: {depth_step:.3f}, RMSE: {depth_rmse:.3f}")
+
+
+
+
 
     if len(verticals_sorted) >= 1:
         distance_to_stairs = (True, verticals_sorted[-1])

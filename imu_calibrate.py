@@ -95,13 +95,13 @@ def get_rotation_matrix(cam_rpy):
     """
 
 
-    # cam2world_R = np.array([[ 0, -1,  0],
-    #                         [ 0,  0,  1],
-    #                         [-1,  0,  0]])
+    cam2world_R = np.array([[ 0, -1,  0],
+                            [ 0,  0,  1],
+                            [-1,  0,  0]])
     
-    cam2world_R = np.array([[0, -1,  0],
-                            [0,  0, -1],
-                            [1,  0,  0]])
+    # cam2world_R = np.array([[0, -1,  0],
+    #                         [0,  0, -1],
+    #                         [1,  0,  0]])
 
     rx, ry, rz = np.radians(cam2world_R.dot(cam_rpy))
 

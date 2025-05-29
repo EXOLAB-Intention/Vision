@@ -18,9 +18,9 @@ from plane_detection_histogram_ransac import segment_planes
 
 """
 ****************information****************
-Yolo : N
+Yolo : Y
 Voxel Downsampling : Y
-plane segmentation : RANSAC, Normal Vector
+plane segmentation : Histogram, RANSAC, Normal Vector
 Outlier Remove : Statical method
 Considering Camera Angle
 
@@ -34,8 +34,15 @@ model.to("cpu")
 W = 640
 H = 480
 
+global stairs_height, stairs_depth, step_info_buffer, final_step_info, stop_flag, staircase_faeature
 stairs_height = []
-stairs_width = []
+stairs_depth = []
+stairs_distance = []
+step_info_buffer = []
+final_step_info = None
+MAX_BUFFER = 25
+stop_flag = False
+staircase_faeature = None
 
 base_dir = 'stairs_step_info'
 video_dir = 'stairs_step_video'
@@ -48,21 +55,36 @@ os.makedirs(video_dir, exist_ok=True)
 csv_file_path = os.path.join(base_dir, f'step_data_{timestamp}.csv')
 video_file_path = os.path.join(video_dir, f'step_video_{timestamp}.mp4')
 
-def SaveData(avg_height, avg_depth):
-    
-    stairs_height.append(avg_height)
-    stairs_width.append(avg_depth)
+def SaveData(avg_height, avg_depth, distance_to_stairs, save_distance_only):
+    if save_distance_only:
+        stairs_distance.append(distance_to_stairs)
+    else:
+        stairs_height.append(avg_height)
+        stairs_depth.append(avg_depth)
+        stairs_distance.append(distance_to_stairs)
 
 def GetData():
     with open(csv_file_path, mode='w', newline='') as csvfile:
-        fieldnames = ['stairs_height', 'stairs_width']
+        fieldnames = ['stairs_height', 'stairs_depth', 'distance_to_stair']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
         writer.writeheader()
-        for i in range(len(stairs_height)):
-            writer.writerow({'stairs_height': stairs_height[i],
-                             'stairs_width'  : stairs_width[i]
-                             })
+        for i in range(len(stairs_distance)):
+            if i < len(stairs_height):
+                writer.writerow({'stairs_height': stairs_height[i],
+                                'stairs_depth'  : stairs_depth[i],
+                                'distance_to_stair'  : stairs_distance[i]
+                                })
+            elif i ==len(stairs_height)+1:
+                writer.writerow({'stairs_height': -2,
+                                'stairs_depth'  : -2,
+                                'distance_to_stair'  : -2
+                                })
+            else:
+                writer.writerow({'stairs_height': staircase_faeature[1],
+                                'stairs_depth'  : staircase_faeature[0],
+                                'distance_to_stair' : stairs_distance[i]
+                                })
             
     print(f"==================")
     print(f"Data Saving Done")
@@ -180,17 +202,14 @@ def main():
     canvas3 = FigureCanvas(fig3)
     # *********************************************************
 
-
-    step_info_buffer = []
-    final_step_info = None
-    MAX_BUFFER = 25
-    stop_flag = False
-    staircase_faeature = None
+    global stairs_height, stairs_depth, step_info_buffer, final_step_info, stop_flag, staircase_faeature
+    save_distance_only = False
+    distance_to_stairs_ = -1
 
     while True:
 
-        avg_height = 0.0
-        avg_depth = 0.0
+        avg_height = -1.0
+        avg_depth = -1.0
 
         depth_frame, color_frame, aligned_frames = get_aligned_frames(pipeline, align)
         if depth_frame is None or color_frame is None:
@@ -205,58 +224,63 @@ def main():
         if results[0].boxes.data.shape[0] != 0:
             vis.clear_geometries()
 
-            for result in results[0].boxes.data:
-                x1, y1, x2, y2, conf, cls = result.tolist()
-                x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+            # for result in results[0].boxes.data:
+            x1, y1, x2, y2, conf, cls = results[0].boxes.data[0].tolist()
+            x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
 
-                if int(cls) in [0, 1]:
-                    pcd_filtered = filter_point_cloud(pcd, [x1, y1, x2, y2], pinhole_camera_intrinsic)
+            if int(cls) in [0, 1]:
+                pcd_filtered = filter_point_cloud(pcd, [x1, y1, x2, y2], pinhole_camera_intrinsic)
 
-                    if len(pcd_filtered.points) != 0:
-                        if np.asarray(pcd.points).shape[0] != 0:
-                            planes, vertical_counts, horizon_counts, peak_mask = segment_planes(pcd_filtered, camera_rpy, stop_flag)
-                        else:
-                            planes = []
+                if len(pcd_filtered.points) != 0:
+                    if np.asarray(pcd.points).shape[0] != 0:
+                        planes, vertical_counts, horizon_counts, peak_mask = segment_planes(pcd_filtered, camera_rpy, stop_flag)
+                    else:
+                        planes = []
 
-                        colored_planes, stair_steps, distance_to_stairs, distance = classify_planes(planes, camera_rpy, stop_flag)
+                    colored_planes, stair_steps, distance_to_stairs, distance = classify_planes(planes, camera_rpy, stop_flag)
+                    if distance_to_stairs[0]:
+                        distance_to_stairs_ = -distance_to_stairs[1][2]
+                    else:
+                        distance_to_stairs_ = -1
 
-                        stair_steps_np = np.array(stair_steps)  # shape: (N, 2)
-                        if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2 and staircase_faeature is None:
-                            avg_height = np.mean(stair_steps_np[:, 0])
-                            avg_depth = np.mean(stair_steps_np[:, 1])
-                            # print(f"Average height: {avg_height}, Average depth: {avg_depth}")
+                    stair_steps_np = np.array(stair_steps)  # shape: (N, 2)
+                    if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2 and staircase_faeature is None:
+                        avg_height = np.mean(stair_steps_np[:, 0])
+                        avg_depth = np.mean(stair_steps_np[:, 1])
+                        # print(f"Average height: {avg_height}, Average depth: {avg_depth}")
 
-                            if final_step_info is None:
-                                if stair_steps_np is not None:
-                                    step_info_buffer.append([avg_depth, avg_height])
-                                
-                                if len(step_info_buffer) > MAX_BUFFER:
-                                    step_info_buffer.pop(0)
+                        if final_step_info is None:
+                            if stair_steps_np is not None:
+                                step_info_buffer.append([avg_depth, avg_height])
+                            
+                            if len(step_info_buffer) > MAX_BUFFER:
+                                step_info_buffer.pop(0)
 
-                                if len(step_info_buffer) == MAX_BUFFER and staircase_faeature is None:
-                                    if is_converged(step_info_buffer):
-                                        final_step_info = average_step_info(step_info_buffer)
-                                        print("Staircase Step features:", final_step_info)
-                                        staircase_faeature = final_step_info
+                            if len(step_info_buffer) == MAX_BUFFER and staircase_faeature is None:
+                                if is_converged(step_info_buffer):
+                                    final_step_info = average_step_info(step_info_buffer)
+                                    print("Staircase Step features:", final_step_info)
+                                    staircase_faeature = final_step_info
 
-                                        final_step_info = None
-                                        step_info_buffer.clear()
-                        elif staircase_faeature is not None:
-                            print("Distance to Stair : ", -distance_to_stairs[1][2])
+                                    final_step_info = None
+                                    step_info_buffer.clear()
+                            print(len(step_info_buffer))
+                    elif staircase_faeature is not None and distance_to_stairs[0]:
+                        print("Distance to Stair : ", distance_to_stairs_)
 
-                        # GUI visualization
-                        if not added_geometry:
-                            for plane, sphere in colored_planes:
-                                plane = plane + pcd_origin if rendering else plane
-                                vis.add_geometry(plane)
-                                vis.add_geometry(sphere)
-                            added_geometry = True
-                        else:
-                            vis.clear_geometries()
-                            for plane, sphere in colored_planes:
-                                plane = plane + pcd_origin if rendering else plane
-                                vis.add_geometry(plane)
-                                vis.add_geometry(sphere)
+                    # GUI visualization
+                    if not added_geometry:
+                        for plane, sphere in colored_planes:
+                            plane = plane + pcd_origin if rendering else plane
+                            vis.add_geometry(plane)
+                            vis.add_geometry(sphere)
+                        added_geometry = True
+                    else:
+                        vis.clear_geometries()
+                        for plane, sphere in colored_planes:
+                            plane = plane + pcd_origin if rendering else plane
+                            vis.add_geometry(plane)
+                            vis.add_geometry(sphere)
 
         else: 
             vis.clear_geometries()
@@ -320,11 +344,14 @@ def main():
                 save_start = True
             
             if save_start:
+                if staircase_faeature is not None:
+                    save_distance_only = True
                 out.write(color_image)
-                SaveData(avg_height, avg_depth)
+                SaveData(avg_height, avg_depth, distance_to_stairs_, save_distance_only)
                 
             if key == ord("d"):
                 save_start = False
+                out.release()
                 GetData()
 
             if key in (27, ord("q")):

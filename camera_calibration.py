@@ -1,5 +1,6 @@
 import open3d as o3d
 import numpy as np
+from scipy.signal import savgol_filter
 
 """
 ****************hyper parameter**************** 
@@ -13,7 +14,22 @@ std_ratio : outlier 판단 기준이 되는 표준편차 배수
             작은 값일수록 더 민감하게 outlier를 제거
 """
 
-def create_point_cloud(depth_frame, color_frame, intrinsics, cam_rpy, window_size = 3, order = 2):
+# ********************hyper parameter********************
+global voxel_size, nb_neighbors, std_ratio
+
+voxel_size = 0.025
+nb_neighbors=50
+std_ratio=1.0 
+# std_ratio=2.0
+
+filtering_pcd = True
+window_size = 3
+order = 2
+
+# *******************************************************
+
+def create_point_cloud(depth_frame, color_frame, intrinsics, cam_rpy):
+    global voxel_size, nb_neighbors, std_ratio
 
     depth_image = np.asanyarray(depth_frame.get_data()).copy()
     color_image = np.asanyarray(color_frame.get_data()).copy()
@@ -35,31 +51,25 @@ def create_point_cloud(depth_frame, color_frame, intrinsics, cam_rpy, window_siz
     indices = np.where(mask)[0]
     pcd = pcd.select_by_index(indices)
 
+    filtered_points = points[mask]
+    # if filtering_pcd:
+    #     if len(filtered_points) >= window_size:
+
+    #         x_values = savgol_filter(filtered_points[:, 0], window_size, order)
+    #         y_values = savgol_filter(filtered_points[:, 1], window_size, order)
+    #         z_values = savgol_filter(filtered_points[:, 2], window_size, order)
+    #         filtered_points = np.vstack([x_values, y_values, z_values]).T
+
+    #     pcd.points = o3d.utility.Vector3dVector(filtered_points)
 
     pcd.transform([[1, 0, 0, 0],
                    [0, -1, 0, 0],
                    [0, 0, -1, 0],
                    [0, 0, 0, 1]])
-    
 
-
-    # print(np.asarray(pcd_.points))
-
-
-    # filtered_points = points[mask]
-
-    # if len(filtered_points) >= window_size:
-
-    #     x_values = savgol_filter(filtered_points[:, 0], window_size, order)
-    #     y_values = savgol_filter(filtered_points[:, 1], window_size, order)
-    #     z_values = savgol_filter(filtered_points[:, 2], window_size, order)
-    #     filtered_points = np.vstack([x_values, y_values, z_values]).T
-
-    # pcd.points = o3d.utility.Vector3dVector(filtered_points)
-
-    voxel_size = 0.025
+    voxel_size = voxel_size
     pcd_ = pcd.voxel_down_sample(voxel_size=voxel_size)
-    pcd_, ind = pcd_.remove_statistical_outlier(nb_neighbors=50, std_ratio=1.0) # std_ratio=2.0
+    pcd_, ind = pcd_.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio) # std_ratio=2.0
 
     # pcd = rotate_coordinates(pcd, cam_rpy)
 

@@ -5,21 +5,33 @@ import numpy as np
 from imu_calibrate import rotate_points, rotate_vector
 from scipy.signal import savgol_filter, find_peaks
 
+
+# ********************hyper parameter********************
+# bin_width=0.02
+# height_tol=0.03
+# depth_tol=0.03
+# min_slice_pts=200
+# ransac_dist=0.005
+# ransac_n=3
+# ransac_iter=80)
+
+bin_width=0.02
+height_tol=0.1
+depth_tol=0.1
+min_slice_pts=100
+ransac_dist=0.005
+ransac_n=3
+ransac_iter=80
+# *******************************************************
+
 def segment_planes(pcd_or_pts, cam_rpy, stop_flag,
-                                    # bin_width=0.02,
-                                    # height_tol=0.03,
-                                    # depth_tol=0.03,
-                                    # min_slice_pts=200,
-                                    # ransac_dist=0.005,
-                                    # ransac_n=3,
-                                    # ransac_iter=80):
-                                    bin_width=0.02,
-                                    height_tol=0.03,
-                                    depth_tol=0.03,
-                                    min_slice_pts=100,
-                                    ransac_dist=0.005,
-                                    ransac_n=3,
-                                    ransac_iter=80):
+                                    bin_width=bin_width,
+                                    height_tol=height_tol,
+                                    depth_tol=depth_tol,
+                                    min_slice_pts=min_slice_pts,
+                                    ransac_dist=ransac_dist,
+                                    ransac_n=ransac_n,
+                                    ransac_iter=ransac_iter):
     """
     히스토그램 슬라이싱 후 RANSAC으로 평면 모델을 뽑아내는 함수.
     • 입력

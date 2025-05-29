@@ -26,8 +26,18 @@ Considering Camera Angle
 
 """
 
-W = 640
-H = 480
+# ********************hyper parameter********************
+
+W = 640  # width of opence window size
+H = 480  # height of opence window size
+
+stair_feature_std_threshold = 0.01  # To estimate stair's features as high reliability
+num_peak_calculated = 4             # The number of peak when calculating mean height, depth of stair
+
+MAX_BUFFER = 50 # Buffer size when calculating standard deviation of stair's feautre
+
+# *******************************************************
+
 
 stairs_height = []
 stairs_width = []
@@ -65,13 +75,13 @@ def GetData():
 
 def rpy_to_rotmat(cam_rpy):
 
-    # cam2world_R = np.array([[0, -1,  0],
-    #                         [0,  0, -1],
-    #                         [-1,  0,  0]])
-
     cam2world_R = np.array([[0, -1,  0],
                             [0,  0, -1],
-                            [1,  0,  0]])
+                            [-1,  0,  0]])
+
+    # cam2world_R = np.array([[0, -1,  0],
+    #                         [0,  0, -1],
+    #                         [1,  0,  0]])
     
     rx_rad, ry_rad, rz_rad = np.radians(np.dot(cam2world_R, cam_rpy))
 
@@ -93,7 +103,7 @@ def rpy_to_rotmat(cam_rpy):
 
     return Rz @ Ry @ Rx
 
-def is_converged(step_info_buffer, std_threshold=0.01):
+def is_converged(step_info_buffer, std_threshold=stair_feature_std_threshold):
     arr = np.array(step_info_buffer)
     std = np.std(arr, axis=0)
     
@@ -154,7 +164,6 @@ def main():
     
     step_info_buffer = []
     final_step_info = None
-    MAX_BUFFER = 50
     stop_flag = False
     staircase_faeature = None
 
@@ -194,13 +203,45 @@ def main():
         # Getting stairs step information from the distance btw horizontal and vertical plane
         colored_planes, stair_steps, distance_to_stairs, distance = classify_planes(planes, camera_rpy, stop_flag)
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+        # colored_planes, stair_steps, distance_to_stairs, distance, \
+        # filtered_height, filtered_depth, smoothed_heights, smoothed_depths = classify_planes(
+        #     planes, camera_rpy, stop_flag,
+        #     angle_threshold=0.98, d_threshold=0.02, max_area=3.5
+        # )
+
+        # print(f"계단 단 높이 평균 (클러스터링): {filtered_height:.3f} m")
+        # print(f"계단 단 깊이 평균 (클러스터링): {filtered_depth:.3f} m")
+        # print(f"EMA 보정 높이 시계열: {np.round(smoothed_heights, 3)}")
+        # print(f"EMA 보정 깊이 시계열: {np.round(smoothed_depths, 3)}")
+
+
+
+
+
+
+
+
+
         stair_steps_np = np.array(stair_steps)  # shape: (N, 2)
         distance_np = np.array(distance)
 
         if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2 and staircase_faeature is None:
 
             n = stair_steps_np.shape[0]
-            step_num = n if n < 4 else 4
+            step_num = n if n < num_peak_calculated else num_peak_calculated
             avg_height = np.mean(stair_steps_np[:step_num, 0])
             avg_depth = np.mean(stair_steps_np[:step_num, 1])
             avg_height_ = np.mean(distance_np[:step_num, 0])
