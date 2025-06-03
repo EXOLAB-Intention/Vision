@@ -6,6 +6,8 @@ import copy
 from scipy.spatial import cKDTree
 from sklearn.cluster import KMeans
 from scipy.optimize import curve_fit
+from sklearn.linear_model import RANSACRegressor
+
 """
 
 ****************Plane Detection**************** 
@@ -24,33 +26,58 @@ ransac_n : 평면으로 인식할 이웃 point들의 수
 
 # ********************hyper parameter********************
 
-angle_threshold=15             # Plane Merging Procedure : threshold when you compare two nomal vector of planes with degree angle
+angle_threshold=15              # Plane Merging Procedure : threshold when you compare two nomal vector of planes with degree angle
 angle_threshold_normal = 0.9   # Plane Merging Procedure : threshold when you compare two nomal vector of planes with cosine value
-d_threshold=0.06               # Plane Merging Procedure : if distance btw two planes is smaller than d_threshold, two planes will be merged
-plane_threshold_normal = 0.95  # Dividing horizon, verical plane : if the y or z axis of normal vector is bigger than threshold, plane label will be divided into horizontal or vertical
+d_threshold=0.05                # Plane Merging Procedure : if distance btw two planes is smaller than d_threshold, two planes will be merged
+
+plane_threshold_normal = 0.95   # Dividing horizon, verical plane : if the y or z axis of normal vector is bigger than threshold, plane label will be divided into horizontal or vertical
+
+angle_threshold_deg = 15
 
 # *******************************************************
 
-
-def fit_stair_model(sorted_centers, axis=1):
+def fit_stair_model(sorted_centers, axis):
     coords = np.array(sorted_centers)
-    step_indices = np.arange(len(coords))
-    basis_normal_vec = coords[:, axis]
+    step_indices = np.arange(len(coords)).reshape(-1, 1)
+    basis_normal_vec = coords[:, axis].reshape(-1, 1) if axis == 1 else -coords[:, axis].reshape(-1, 1)
 
-    def stair_func(n, step_size, offset):
-        return step_size * n + offset
+    model = RANSACRegressor(min_samples=2, residual_threshold=0.05)
+    model.fit(step_indices, basis_normal_vec)
 
-    popt, _ = curve_fit(stair_func, step_indices, basis_normal_vec)
-    step_size, offset = popt
+    step_size = model.estimator_.coef_[0][0]
+    offset = model.estimator_.intercept_[0]
 
-    predicted = stair_func(step_indices, *popt)
-
-    residuals = basis_normal_vec - predicted
+    predicted = model.predict(step_indices).flatten()
+    residuals = basis_normal_vec.flatten() - predicted
     rmse = np.sqrt(np.mean(residuals**2))
 
     return step_size, offset, predicted, rmse
 
+
+# def fit_stair_model(sorted_centers, axis):
+#     coords = np.array(sorted_centers)
+#     step_indices = np.arange(len(coords))
+#     basis_normal_vec = coords[:, axis] if axis == 1 else -coords[:, axis] 
+#     if axis ==1:
+#         print(f"y_vector  : {basis_normal_vec}")
+#     if axis ==2:
+#         print(f"z_vector  : {basis_normal_vec}")
+
+#     def stair_func(n, step_size, offset):
+#         return step_size * n + offset
+#     popt, _ = curve_fit(stair_func, step_indices, basis_normal_vec)
+#     step_size, offset = popt
+
+#     predicted = stair_func(step_indices, *popt)
+#     print(f"predicted  : {predicted}")
+#     residuals = basis_normal_vec - predicted
+#     rmse = np.sqrt(np.mean(residuals**2))
+
+#     return step_size, offset, predicted, rmse
+
 def classify_planes(planes, cam_ori, stop_flag, angle_threshold=angle_threshold, d_threshold=d_threshold, max_area=3.5):
+
+    cos_threshold = abs(np.cos(np.radians(angle_threshold_deg)))
     colored_planes = []
     horizontals = []
     verticals = []
@@ -61,9 +88,6 @@ def classify_planes(planes, cam_ori, stop_flag, angle_threshold=angle_threshold,
     distance = []
 
     used = [False] * len(planes)
-    # print("-----------------")
-    # print(f"plane N : {len(planes)}")
-
 
     for i in range(len(planes)):
         if used[i]:
@@ -99,7 +123,6 @@ def classify_planes(planes, cam_ori, stop_flag, angle_threshold=angle_threshold,
             merged_pcd.normals = planes[i][1].normals
 
         merged_planes.append((planes[i][0], merged_pcd))
-    # print(f"plane N : {len(merged_planes)}")
 
     for plane_model, plane in merged_planes:
         
@@ -115,16 +138,23 @@ def classify_planes(planes, cam_ori, stop_flag, angle_threshold=angle_threshold,
 
         center = rotate_vector(center, cam_ori)
 
+        cos_normal_z = abs(np.dot(normal, [0,0,1])) 
+        cos_normal_y = abs(np.dot(normal, [0,1,0]))
+        cos_normal_x = abs(np.dot(normal, [1,0,0]))
 
         # horizontal : red
-        if abs(normal[1]) >  plane_threshold_normal:
+        # if abs(normal[1]) > plane_threshold_normal:
+        # if cos_normal_y > cos_threshold and cos_normal_z < (1 - cos_threshold):
+        if cos_normal_y > cos_threshold:
             plane.paint_uniform_color([1, 0, 0])
             sphere.paint_uniform_color([0, 0, 0])
             horizontals.append(center)
             horizontal_plane_distance.append(plane_d)
 
         # vertical : blue
-        elif abs(normal[2]) > plane_threshold_normal:
+        # elif abs(normal[2]) > plane_threshold_normal:
+        # elif cos_normal_z > cos_threshold and cos_normal_y < (1 - cos_threshold)
+        elif cos_normal_z > cos_threshold or cos_normal_x > cos_threshold:
             plane.paint_uniform_color([0, 0, 1])
             sphere.paint_uniform_color([0, 0, 0])
             verticals.append(center)
@@ -160,21 +190,19 @@ def classify_planes(planes, cam_ori, stop_flag, angle_threshold=angle_threshold,
         if depth > 0.01:
             depths.append(depth)
 
-
-
-
-
-    if len(horizontals_sorted) != 0:
+    if len(horizontals_sorted) > 1:
+        horizontals_sorted = sorted(horizontals, key=lambda x: x[1])
         height_step, height_offset, pred_heights, height_rmse = fit_stair_model(horizontals_sorted, axis=1)
-        print(f"Step height: {height_step:.3f}, RMSE: {height_rmse:.3f}")
+        # print(f"Step height: {height_step:.3f}, RMSE: {height_rmse:.3f}")
+    else:
+        height_step = -1
 
-    if len(verticals_sorted) != 0:
+    if len(verticals_sorted) > 1:
+        verticals_sorted = sorted(verticals, key=lambda x: -x[2])
         depth_step, depth_offset, pred_depths, depth_rmse = fit_stair_model(verticals_sorted, axis=2)
-        print(f"Step depth: {depth_step:.3f}, RMSE: {depth_rmse:.3f}")
-
-
-
-
+        # print(f"Step depth: {depth_step:.3f}, RMSE: {depth_rmse:.3f}")
+    else:
+        depth_step = -1
 
     if len(verticals_sorted) >= 1:
         distance_to_stairs = (True, verticals_sorted[-1])
@@ -189,4 +217,4 @@ def classify_planes(planes, cam_ori, stop_flag, angle_threshold=angle_threshold,
     for i in range(num_steps):
         distance.append((horizon_d[i], vertical_d[i]))
 
-    return colored_planes, stair_steps, distance_to_stairs, distance
+    return colored_planes, stair_steps, distance_to_stairs, distance, height_step, depth_step

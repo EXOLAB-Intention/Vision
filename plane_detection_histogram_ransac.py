@@ -19,7 +19,7 @@ bin_width=0.02
 height_tol=0.1
 depth_tol=0.1
 min_slice_pts=100
-ransac_dist=0.005
+ransac_dist=0.02
 ransac_n=3
 ransac_iter=80
 # *******************************************************

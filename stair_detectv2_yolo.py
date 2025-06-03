@@ -34,7 +34,7 @@ model.to("cpu")
 W = 640
 H = 480
 
-global stairs_height, stairs_depth, step_info_buffer, final_step_info, stop_flag, staircase_faeature
+global stairs_height, stairs_depth, step_info_buffer, final_step_info, stop_flag, staircase_feature
 stairs_height = []
 stairs_depth = []
 stairs_distance = []
@@ -42,7 +42,7 @@ step_info_buffer = []
 final_step_info = None
 MAX_BUFFER = 25
 stop_flag = False
-staircase_faeature = None
+staircase_feature = None
 
 base_dir = 'stairs_step_info'
 video_dir = 'stairs_step_video'
@@ -81,8 +81,8 @@ def GetData():
                                 'distance_to_stair'  : -2
                                 })
             else:
-                writer.writerow({'stairs_height': staircase_faeature[1],
-                                'stairs_depth'  : staircase_faeature[0],
+                writer.writerow({'stairs_height': staircase_feature[1],
+                                'stairs_depth'  : staircase_feature[0],
                                 'distance_to_stair' : stairs_distance[i]
                                 })
             
@@ -189,8 +189,12 @@ def main():
     x_data = deque(maxlen=30)
     height_data = deque(maxlen=30)
     depth_data = deque(maxlen=30)
+    height_curvfit = deque(maxlen=30)
+    depth_curvfit= deque(maxlen=30)
     line1, = ax.plot([], [], label='Avg Height')
     line2, = ax.plot([], [], label='Avg Depth')
+    line3, = ax.plot([], [], label='CurvFit Height')
+    line4, = ax.plot([], [], label='CurvFit Depth')
     ax.set_ylim(0, 0.5)
     ax.grid(True)
     ax.legend()
@@ -202,7 +206,7 @@ def main():
     canvas3 = FigureCanvas(fig3)
     # *********************************************************
 
-    global stairs_height, stairs_depth, step_info_buffer, final_step_info, stop_flag, staircase_faeature
+    global stairs_height, stairs_depth, step_info_buffer, final_step_info, stop_flag, staircase_feature
     save_distance_only = False
     distance_to_stairs_ = -1
 
@@ -210,6 +214,8 @@ def main():
 
         avg_height = -1.0
         avg_depth = -1.0
+        height_step = -1.0
+        depth_step = -1.0
 
         depth_frame, color_frame, aligned_frames = get_aligned_frames(pipeline, align)
         if depth_frame is None or color_frame is None:
@@ -237,14 +243,14 @@ def main():
                     else:
                         planes = []
 
-                    colored_planes, stair_steps, distance_to_stairs, distance = classify_planes(planes, camera_rpy, stop_flag)
+                    colored_planes, stair_steps, distance_to_stairs, distance, height_step, depth_step = classify_planes(planes, camera_rpy, stop_flag)
                     if distance_to_stairs[0]:
                         distance_to_stairs_ = -distance_to_stairs[1][2]
                     else:
                         distance_to_stairs_ = -1
 
                     stair_steps_np = np.array(stair_steps)  # shape: (N, 2)
-                    if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2 and staircase_faeature is None:
+                    if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2 and staircase_feature is None:
                         avg_height = np.mean(stair_steps_np[:, 0])
                         avg_depth = np.mean(stair_steps_np[:, 1])
                         # print(f"Average height: {avg_height}, Average depth: {avg_depth}")
@@ -256,16 +262,15 @@ def main():
                             if len(step_info_buffer) > MAX_BUFFER:
                                 step_info_buffer.pop(0)
 
-                            if len(step_info_buffer) == MAX_BUFFER and staircase_faeature is None:
+                            if len(step_info_buffer) == MAX_BUFFER and staircase_feature is None:
                                 if is_converged(step_info_buffer):
                                     final_step_info = average_step_info(step_info_buffer)
                                     print("Staircase Step features:", final_step_info)
-                                    staircase_faeature = final_step_info
+                                    staircase_feature = final_step_info
 
                                     final_step_info = None
                                     step_info_buffer.clear()
-                            print(len(step_info_buffer))
-                    elif staircase_faeature is not None and distance_to_stairs[0]:
+                    elif staircase_feature is not None and distance_to_stairs[0]:
                         print("Distance to Stair : ", distance_to_stairs_)
 
                     # GUI visualization
@@ -313,10 +318,14 @@ def main():
             x_data.append(t)
             height_data.append(avg_height)
             depth_data.append(avg_depth)
+            height_curvfit.append(height_step)
+            depth_curvfit.append(depth_step)
 
             line1.set_data(x_data, height_data)
             line2.set_data(x_data, depth_data)
-
+            line3.set_data(x_data, height_curvfit)
+            line4.set_data(x_data, depth_curvfit)
+            
             ax.relim()
             ax.autoscale_view()
 
@@ -344,7 +353,7 @@ def main():
                 save_start = True
             
             if save_start:
-                if staircase_faeature is not None:
+                if staircase_feature is not None:
                     save_distance_only = True
                 out.write(color_image)
                 SaveData(avg_height, avg_depth, distance_to_stairs_, save_distance_only)

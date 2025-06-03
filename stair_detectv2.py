@@ -149,8 +149,14 @@ def main():
     x_data = deque(maxlen=30)
     height_data = deque(maxlen=30)
     depth_data = deque(maxlen=30)
+    height_curvfit = deque(maxlen=30)
+    depth_curvfit= deque(maxlen=30)
+
     line1, = ax.plot([], [], label='Avg Height')
     line2, = ax.plot([], [], label='Avg Depth')
+    line3, = ax.plot([], [], label='CurvFit Height')
+    line4, = ax.plot([], [], label='CurvFit Depth')
+
     ax.set_ylim(0, 0.5)
     ax.grid(True)
     ax.legend()
@@ -165,14 +171,16 @@ def main():
     step_info_buffer = []
     final_step_info = None
     stop_flag = False
-    staircase_faeature = None
-
+    staircase_feature = None
+    save_distance_only = False
+    distance_to_stairs_ = -1
+    
     while True:
 
-        avg_height = 0.0
-        avg_depth = 0.0
-        avg_height_ = 0.0
-        avg_depth_ = 0.0
+        avg_height = -1.0
+        avg_depth = -1.0
+        height_step = -1.0
+        depth_step = -1.0
 
         # *******************Depth / RGB image aligning************
         depth_frame, color_frame, aligned_frames = get_aligned_frames(pipeline, align)
@@ -194,51 +202,18 @@ def main():
             stop_flag = True
             
         # Using Ransac
-        points = np.asarray(pcd.points)  # PointCloud 객체 → NumPy 배열
+        points = np.asarray(pcd.points)
         if points.shape[0] != 0:
             planes, vertical_counts, horizon_counts, peak_mask = segment_planes(points, camera_rpy, stop_flag)
         else:
             planes = []
 
         # Getting stairs step information from the distance btw horizontal and vertical plane
-        colored_planes, stair_steps, distance_to_stairs, distance = classify_planes(planes, camera_rpy, stop_flag)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        # colored_planes, stair_steps, distance_to_stairs, distance, \
-        # filtered_height, filtered_depth, smoothed_heights, smoothed_depths = classify_planes(
-        #     planes, camera_rpy, stop_flag,
-        #     angle_threshold=0.98, d_threshold=0.02, max_area=3.5
-        # )
-
-        # print(f"계단 단 높이 평균 (클러스터링): {filtered_height:.3f} m")
-        # print(f"계단 단 깊이 평균 (클러스터링): {filtered_depth:.3f} m")
-        # print(f"EMA 보정 높이 시계열: {np.round(smoothed_heights, 3)}")
-        # print(f"EMA 보정 깊이 시계열: {np.round(smoothed_depths, 3)}")
-
-
-
-
-
-
-
-
-
+        colored_planes, stair_steps, distance_to_stairs, distance, height_step, depth_step = classify_planes(planes, camera_rpy, stop_flag)
         stair_steps_np = np.array(stair_steps)  # shape: (N, 2)
         distance_np = np.array(distance)
 
-        if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2 and staircase_faeature is None:
+        if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2 and staircase_feature is None:
 
             n = stair_steps_np.shape[0]
             step_num = n if n < num_peak_calculated else num_peak_calculated
@@ -255,16 +230,17 @@ def main():
                 if len(step_info_buffer) > MAX_BUFFER:
                     step_info_buffer.pop(0)
 
-                if len(step_info_buffer) == MAX_BUFFER and staircase_faeature is None:
+                if len(step_info_buffer) == MAX_BUFFER and staircase_feature is None:
                     if is_converged(step_info_buffer):
                         final_step_info = average_step_info(step_info_buffer)
                         print("Staircase Step features:", final_step_info)
-                        staircase_faeature = final_step_info
+                        staircase_feature = final_step_info
 
                         final_step_info = None
                         step_info_buffer.clear()
-        elif staircase_faeature is not None:
-            print("Distance to Stair : ", -distance_to_stairs[1][2])
+        elif staircase_feature is not None and distance_to_stairs[0]:
+            print("Distance to Stair : ", distance_to_stairs_)
+
 
 
         R_cam = rpy_to_rotmat(camera_rpy)
@@ -310,9 +286,13 @@ def main():
             x_data.append(t)
             height_data.append(avg_height)
             depth_data.append(avg_depth)
+            height_curvfit.append(height_step)
+            depth_curvfit.append(depth_step)
 
             line1.set_data(x_data, height_data)
             line2.set_data(x_data, depth_data)
+            line3.set_data(x_data, height_curvfit)
+            line4.set_data(x_data, depth_curvfit)
 
             ax.relim()
             ax.autoscale_view()
@@ -328,22 +308,24 @@ def main():
             # ----------------Histogram counts-----------------
             ax2.clear()
             x = np.arange(len(horizon_counts[0]))
-            ax2.plot(x, horizon_counts[0], x, horizon_counts[1])
+            ax2.plot(x, horizon_counts[0], label="histogram counts")
+            ax2.plot(x, horizon_counts[1], label="filtered counts")
             ax2.scatter(x[peak_mask[1]], horizon_counts[1][peak_mask[1]], color='red', s=50, label="peaks")
             ax2.set_title("Horizon Histogram"); ax2.set_ylabel("Count")
             ax2.set_ylim(0, np.max(horizon_counts[0])); ax2.set_xlim(0, 140); ax2.grid(True)
-            ax2.legend("histogram counts", "filtered counts")
+            ax2.legend()
             canvas2.draw()
             buf = np.asarray(canvas2.buffer_rgba())
             graph_horizon = cv2.cvtColor(buf, cv2.COLOR_RGBA2BGR)
 
             ax3.clear()
             x_ = np.arange(len(vertical_counts[0]))
-            ax3.plot(x_, vertical_counts[0], x_, vertical_counts[1])
+            ax3.plot(x_, vertical_counts[0], label="histogram counts")
+            ax3.plot(x_, vertical_counts[1], label="filtered counts")
             ax3.scatter(x_[peak_mask[0]], vertical_counts[1][peak_mask[0]], color='red', s=50, label="peaks")
             ax3.set_title("Vertical Histogram"); ax3.set_ylabel("Count")
             ax3.set_ylim(0, np.max(vertical_counts[0])); ax3.set_xlim(0, 140); ax3.grid(True)
-            ax3.legend("histogram counts", "filtered counts")
+            ax3.legend()
             canvas3.draw()
             buf_ = np.asarray(canvas3.buffer_rgba())
             graph_vertical = cv2.cvtColor(buf_, cv2.COLOR_RGBA2BGR)
