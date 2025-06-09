@@ -203,6 +203,7 @@ def classify_planes(planes, cam_ori, stop_flag, angle_threshold=angle_threshold,
         # print(f"Step depth: {depth_step:.3f}, RMSE: {depth_rmse:.3f}")
     else:
         depth_step = -1
+        depth_offset = -1
 
     if len(verticals_sorted) >= 1:
         distance_to_stairs = (True, verticals_sorted[-1])
@@ -217,4 +218,4 @@ def classify_planes(planes, cam_ori, stop_flag, angle_threshold=angle_threshold,
     for i in range(num_steps):
         distance.append((horizon_d[i], vertical_d[i]))
 
-    return colored_planes, stair_steps, distance_to_stairs, distance, height_step, depth_step
+    return colored_planes, stair_steps, distance_to_stairs, distance, (height_step, depth_step, depth_offset)

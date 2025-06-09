@@ -38,9 +38,22 @@ MAX_BUFFER = 50 # Buffer size when calculating standard deviation of stair's fea
 
 # *******************************************************
 
+global stairs_height, stairs_depth, step_info_buffer, final_step_info, stop_flag, staircase_feature
 
 stairs_height = []
-stairs_width = []
+stairs_depth = []
+stairs_distance = []
+
+stairs_height_curvfit = []
+stairs_depth_curvfit = []
+stairs_distance_curvfit = []
+
+staircase_feature = None
+step_info_buffer = []
+final_step_info = None
+stop_flag = False
+save_distance_only = False
+distance_to_stairs_ = -1
 
 base_dir = 'stairs_step_info'
 video_dir = 'stairs_step_video'
@@ -53,23 +66,52 @@ os.makedirs(video_dir, exist_ok=True)
 csv_file_path = os.path.join(base_dir, f'step_data_{timestamp}.csv')
 video_file_path = os.path.join(video_dir, f'step_video_{timestamp}.mp4')
 
-def SaveData(avg_height, avg_depth):
-    
-    stairs_height.append(avg_height)
-    stairs_width.append(avg_depth)
+def SaveData(avg_height, avg_depth, distance_to_stairs, height_step, depth_step, depth_offset, save_distance_only):
+    if save_distance_only:
+        stairs_distance.append(distance_to_stairs)
+        stairs_distance_curvfit.append(depth_offset)
+    else:
+        stairs_height.append(avg_height)
+        stairs_depth.append(avg_depth)
+        stairs_distance.append(distance_to_stairs)
+        stairs_height_curvfit.append(height_step)
+        stairs_depth_curvfit.append(depth_step)
+        stairs_distance_curvfit.append(depth_offset)
+
 
 
 def GetData():
     with open(csv_file_path, mode='w', newline='') as csvfile:
-        fieldnames = ['stairs_height', 'stairs_width']
+        fieldnames = ['stairs_height', 'stairs_depth', 'stairs_distance', 'stairs_height_curvfit', 'stairs_depth_curvfit', 'stairs_distance_curvfit']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
         writer.writeheader()
-        for i in range(len(stairs_height)):
-            writer.writerow({'stairs_height': stairs_height[i],
-                             'stairs_width'  : stairs_width[i]
-                             })
-            
+        for i in range(len(stairs_distance_curvfit)):
+            if i < len(stairs_height_curvfit):  
+                writer.writerow({'stairs_height': stairs_height[i],
+                                 'stairs_depth'  : stairs_depth[i],
+                                 'stairs_distance' : stairs_distance[i],
+                                 'stairs_height_curvfit' : stairs_height_curvfit[i],
+                                 'stairs_depth_curvfit' : stairs_depth_curvfit[i],
+                                 'stairs_distance_curvfit' : stairs_distance_curvfit[i]
+                                })
+            elif i ==len(stairs_height)+1:
+                writer.writerow({'stairs_height': -2,
+                                 'stairs_depth'  : -2,
+                                 'stairs_distance'  : -2,
+                                 'stairs_height_curvfit' : -2,
+                                 'stairs_depth_curvfit' : -2,
+                                 'stairs_distance_curvfit' : -2
+                                })
+            else:
+                writer.writerow({'stairs_height': -1,
+                                 'stairs_depth'  : -1,
+                                 'stairs_distance'  : -1,
+                                 'stairs_height_curvfit': staircase_feature[1],
+                                 'stairs_depth_curvfit'  : staircase_feature[0],
+                                 'stairs_distance_curvfit' : stairs_distance_curvfit[i]
+                                })
+                
     print(f"==================")
     print(f"Data Saving Done")
 
@@ -168,13 +210,10 @@ def main():
     canvas3 = FigureCanvas(fig3)
     # *********************************************************
     
-    step_info_buffer = []
-    final_step_info = None
-    stop_flag = False
-    staircase_feature = None
+    global stairs_height, stairs_depth, step_info_buffer, final_step_info, stop_flag, staircase_feature
     save_distance_only = False
     distance_to_stairs_ = -1
-    
+
     while True:
 
         avg_height = -1.0
@@ -209,9 +248,17 @@ def main():
             planes = []
 
         # Getting stairs step information from the distance btw horizontal and vertical plane
-        colored_planes, stair_steps, distance_to_stairs, distance, height_step, depth_step = classify_planes(planes, camera_rpy, stop_flag)
+        colored_planes, stair_steps, distance_to_stairs, distance, (height_step, depth_step, depth_offset) = classify_planes(planes, camera_rpy, stop_flag)
+        if distance_to_stairs[0]:
+            distance_to_stairs_ = -distance_to_stairs[1][2]
+        else:
+            distance_to_stairs_ = -1
+        
         stair_steps_np = np.array(stair_steps)  # shape: (N, 2)
         distance_np = np.array(distance)
+        print("-------------------------------------------")
+        print(f"distance_to_stairs  : {distance_to_stairs}")
+        print(f"depth_offset  : {depth_offset}")
 
         if stair_steps_np.ndim == 2 and stair_steps_np.shape[1] == 2 and staircase_feature is None:
 
@@ -225,8 +272,9 @@ def main():
 
             if final_step_info is None:
                 if stair_steps_np is not None:
-                    step_info_buffer.append([avg_depth, avg_height])
-                
+                    # step_info_buffer.append([avg_depth, avg_height])
+                    step_info_buffer.append([depth_step, height_step])
+
                 if len(step_info_buffer) > MAX_BUFFER:
                     step_info_buffer.pop(0)
 
@@ -349,8 +397,10 @@ def main():
                 save_start = True
             
             if save_start:
+                if staircase_feature is not None:
+                    save_distance_only = True
                 out.write(color_image)
-                SaveData(avg_height, avg_depth)
+                SaveData(avg_height, avg_depth, distance_to_stairs_, height_step, depth_step, depth_offset, save_distance_only)
                 
             if key == ord("d"):
                 save_start = False
